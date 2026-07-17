@@ -10,6 +10,7 @@ Zero install. Zero dependencies. Zero binaries. Built-in undo.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://www.microsoft.com/windows)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE?logo=powershell&logoColor=white)](https://docs.microsoft.com/en-us/powershell/)
+[![Latest release](https://img.shields.io/github/v/release/vadyaravadim/timer-resolution-utility)](https://github.com/vadyaravadim/timer-resolution-utility/releases)
 ![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)
 
 </div>
@@ -136,7 +137,7 @@ If a tweak doesn't improve your `Sleep(1)` numbers (or your frame-time graph), u
 .\timer-resolution-utility.ps1 -Undo
 ```
 
-Reverts everything recorded in the newest `timer_undo_*.json`: bcdedit values are restored or removed, the registry value is restored or deleted, the holder task is unregistered. Ran the utility several times? Undo files are per-run snapshots — revert newest-to-oldest.
+Reverts everything recorded in the newest `timer_undo_*.json`: bcdedit values are restored or removed, the registry value is restored or deleted, the holder task is unregistered (or restored to its previous definition if it existed before the tweak). Ran the utility several times? Undo files are per-run snapshots — revert newest-to-oldest; after each `-Undo` the script tells you how many older undo files remain.
 
 Last resort: every bcdedit change is preceded by a full BCD store export (`bcd_backup_*` next to the script). Restore it with:
 
@@ -181,6 +182,10 @@ The old advice to **force** HPET (`bcdedit /set useplatformclock true`) is outda
 ### How is this different from TimerResolution.exe / ISLC?
 
 `TimerResolution.exe` (Lucas Hale) is a closed-source `.exe` from 2010-era forums that doesn't survive the Windows 11 per-process change on its own. ISLC holds resolution but is also closed-source and does memory-list cleaning you may not want. This is a readable script that does the same `NtSetTimerResolution` call, adds the Windows 11 registry piece, covers the bcdedit tweaks, measures the result, and writes an undo file first.
+
+### How is this different from SetTimerResolution.exe / MeasureSleep.exe?
+
+Those two binaries (bundled in valleyofdoom's TimerResolution and various tweak packs) split the job: `SetTimerResolution.exe` holds the resolution, `MeasureSleep.exe` verifies it. This script does both — the holder task makes the same `NtSetTimerResolution` call, and `-Measure` is the MeasureSleep equivalent — without shipping any `.exe`. On top of that it covers the `GlobalTimerResolutionRequests` registry value and the bcdedit tick tweaks, with an undo file for all of it.
 
 ### Is it safe?
 

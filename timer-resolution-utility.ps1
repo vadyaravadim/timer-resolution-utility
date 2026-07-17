@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Windows timer stack manager: timer resolution, dynamic tick, HPET.
 .DESCRIPTION
@@ -29,7 +29,8 @@ param(
     [int]$Samples = 30,
     [switch]$Undo,
     [switch]$Hold,      # internal: used by the scheduled task to keep max resolution requested
-    [switch]$Elevated   # internal: set by the self-elevation relaunch
+    [switch]$Elevated,  # internal: set by the self-elevation relaunch
+    [string]$LogonUser  # internal: the pre-elevation user, for the holder task binding
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,9 +103,14 @@ function Get-SleepStats([int]$Count) {
 # The request only lives as long as the requesting process, hence the loop.
 if ($Hold) {
     $res = Get-TimerResolution
+    $desired = [uint32]($res.FinestMs * 10000)
     $cur = 0
-    [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $true, [ref]$cur)
-    while ($true) { Start-Sleep -Seconds 3600 }
+    # Re-assert every hour: Win11 can coalesce/ignore requests from background
+    # processes, and a periodic re-request costs nothing.
+    while ($true) {
+        [void][TimerNative]::NtSetTimerResolution($desired, $true, [ref]$cur)
+        Start-Sleep -Seconds 3600
+    }
 }
 
 # ---- Measure mode: no Administrator needed ----
@@ -143,8 +149,11 @@ $principal = New-Object Security.Principal.WindowsPrincipal(
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "Not running as Administrator. Requesting elevation..." -ForegroundColor Yellow
     try {
+        # Forward the current user: under elevation with a different admin
+        # account $env:USERNAME changes, and the holder task would bind to it.
         $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
-                     '-File', "`"$PSCommandPath`"", '-Elevated')
+                     '-File', "`"$PSCommandPath`"", '-Elevated',
+                     '-LogonUser', "`"$env:USERDOMAIN\$env:USERNAME`"")
         if ($Status) { $argList += '-Status' }
         if ($Undo)   { $argList += '-Undo' }
         Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs
@@ -157,8 +166,6 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # ---- Gather current state ----
 # Parsed by element NAME (locale-invariant); the Yes/No value column is
 # matched loosely because some localized builds translate it.
-$bcdRaw = @(bcdedit /enum "{current}" 2>&1)
-$bcdOk = ($LASTEXITCODE -eq 0)
 function Get-BcdValue([string]$Name) {
     if (-not $bcdOk) { return $null }
     foreach ($line in $bcdRaw) {
@@ -167,12 +174,32 @@ function Get-BcdValue([string]$Name) {
     return $null
 }
 function Test-BcdOn($Value) { $Value -match '^(yes|да|oui|ja|s[ií]|sim|tak|evet)$' }
-
-$dynTick   = Get-BcdValue 'disabledynamictick'
-$platTick  = Get-BcdValue 'useplatformtick'
-$platClock = Get-BcdValue 'useplatformclock'
-$globalReq = (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue
-$holderTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+# bcdedit /set only accepts invariant tokens, so undo must not replay a
+# localized Yes/No captured from /enum output - canonicalize when recognized.
+function ConvertTo-BcdBool($Value) {
+    if ($null -eq $Value) { $null }
+    elseif (Test-BcdOn $Value) { 'yes' }
+    elseif ($Value -match '^(no|нет|non|nein|n[aã]o|nie|hay[ıi]r)$') { 'no' }
+    else { $Value }
+}
+function Invoke-Bcdedit {
+    # bcdedit reports failure via exit code only - PowerShell never turns a
+    # native command's nonzero exit into an exception, so without this check
+    # a failed change would be reported as [OK].
+    $out = & bcdedit @args 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "bcdedit $($args -join ' '): $out" }
+    $out
+}
+function Read-TimerTweakState {
+    $script:bcdRaw = @(bcdedit /enum "{current}" 2>&1)
+    $script:bcdOk = ($LASTEXITCODE -eq 0)
+    $script:dynTick    = Get-BcdValue 'disabledynamictick'
+    $script:platTick   = Get-BcdValue 'useplatformtick'
+    $script:platClock  = Get-BcdValue 'useplatformclock'
+    $script:globalReq  = (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue
+    $script:holderTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+Read-TimerTweakState
 # HPET exposes ACPI ID PNP0103; absence just means the board doesn't expose it.
 $hpet = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
         Where-Object { $_.InstanceId -like 'ACPI\PNP0103*' } | Select-Object -First 1
@@ -203,15 +230,22 @@ if ($IsWin11) {
     $gState = if ($globalReq -eq 1) { 'system-wide (1)' } else { 'not set - resolution requests are per-process (Win10 2004+ default)' }
     Write-Host ("Global timer res   : {0}" -f $gState)
 }
-Write-Host ("Holder task        : {0}" -f $(if ($holderTask) { "installed ($($holderTask.State))" } else { 'not installed' }))
+$holderState = if ($holderTask) { "installed ($($holderTask.State))" } else { 'not installed' }
+if ($holderTask -and $IsWin11 -and $globalReq -ne 1) {
+    $holderState += ' - Win11: no system-wide effect until the global requests tweak is applied'
+}
+Write-Host ("Holder task        : {0}" -f $holderState)
 Write-Host ""
 
 if ($Status) { Wait-IfElevatedWindow; return }
 
 # ---- Undo mode ----
 if ($Undo) {
+    # -Filter also matches renamed *.applied.json files, so exclude them, and
+    # sort by the name stamp - LastWriteTime survives renames and can mislead.
     $undoFile = Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime | Select-Object -Last 1
+        Where-Object { $_.Name -notmatch '\.applied\.json$' } |
+        Sort-Object Name | Select-Object -Last 1
     if (-not $undoFile) {
         Write-Host "No timer_undo_*.json found next to the script - nothing to undo." -ForegroundColor Yellow
         Wait-IfElevatedWindow; return
@@ -220,8 +254,8 @@ if ($Undo) {
     foreach ($item in (Get-Content $undoFile.FullName -Raw | ConvertFrom-Json)) {
         switch ($item.Kind) {
             'bcd' {
-                if ($null -ne $item.Previous) { bcdedit /set $item.Name $item.Previous | Out-Null }
-                else { bcdedit /deletevalue $item.Name | Out-Null }
+                if ($null -ne $item.Previous) { Invoke-Bcdedit /set $item.Name $item.Previous | Out-Null }
+                else { Invoke-Bcdedit /deletevalue $item.Name | Out-Null }
                 Write-Host "  [bcd ] $($item.Name) -> $(if ($null -ne $item.Previous) { $item.Previous } else { 'removed (default)' })" -ForegroundColor Green
             }
             'reg' {
@@ -233,12 +267,22 @@ if ($Undo) {
                 Write-Host "  [reg ] $($item.Value) -> $(if ($null -ne $item.Previous) { $item.Previous } else { 'removed (default)' })" -ForegroundColor Green
             }
             'task' {
-                Unregister-ScheduledTask -TaskName $item.Name -Confirm:$false -ErrorAction SilentlyContinue
-                Write-Host "  [task] $($item.Name) removed" -ForegroundColor Green
+                if ($item.Xml) {
+                    Register-ScheduledTask -TaskName $item.Name -Xml $item.Xml -Force | Out-Null
+                    Write-Host "  [task] $($item.Name) restored to previous definition" -ForegroundColor Green
+                } else {
+                    Unregister-ScheduledTask -TaskName $item.Name -Confirm:$false -ErrorAction SilentlyContinue
+                    Write-Host "  [task] $($item.Name) removed" -ForegroundColor Green
+                }
             }
         }
     }
     Rename-Item $undoFile.FullName ($undoFile.FullName -replace '\.json$', '.applied.json')
+    $remaining = @(Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch '\.applied\.json$' })
+    if ($remaining.Count) {
+        Write-Host "$($remaining.Count) older undo file(s) remain - run -Undo again to revert earlier runs." -ForegroundColor Yellow
+    }
     Write-Host "Done. Reboot for bcdedit/registry reverts to take effect." -ForegroundColor Green
     Wait-IfElevatedWindow; return
 }
@@ -268,13 +312,13 @@ $rows.Add([PSCustomObject]@{
 if ($bcdOk) {
     $rows.Add([PSCustomObject]@{
         Id = 'dynamic-tick'; Tweak = 'Disable dynamic tick'
-        Current = $(if (Test-BcdOn $dynTick) { 'already disabled' } else { 'default (enabled)' })
+        Current = $(if (Test-BcdOn $dynTick) { 'already disabled' } elseif ($null -ne $dynTick) { "set to '$dynTick'" } else { 'default (enabled)' })
         Change = 'bcdedit /set disabledynamictick yes'
         Notes = 'The most commonly beneficial bcdedit timer tweak; verify with -Measure before/after'
     })
     $rows.Add([PSCustomObject]@{
         Id = 'platform-tick'; Tweak = 'Force fixed platform tick'
-        Current = $(if (Test-BcdOn $platTick) { 'already forced' } else { 'default' })
+        Current = $(if (Test-BcdOn $platTick) { 'already forced' } elseif ($null -ne $platTick) { "set to '$platTick'" } else { 'default' })
         Change = 'bcdedit /set useplatformtick yes'
         Notes = 'CONTESTED: helps some systems, causes mouse issues on others - measure, and undo if it feels worse'
     })
@@ -295,26 +339,66 @@ if (-not $selected) {
     return
 }
 
+# One definition per tweak id: backup kind, undo record, and apply step live
+# together so a new tweak cannot desync them.
+$tweakDefs = @{
+    'global-reg' = @{
+        Kind = 'reg'
+        UndoEntry = { @{ Kind='reg'; Path=$KernelKey; Value=$GlobalValue; Previous=$globalReq } }
+        Apply = { New-ItemProperty -Path $KernelKey -Name $GlobalValue -Value 1 -PropertyType DWord -Force | Out-Null }
+    }
+    'holder-task' = @{
+        Kind = 'task'
+        # Xml of a pre-existing task lets -Undo restore it instead of losing it
+        # to Register-ScheduledTask -Force.
+        UndoEntry = { @{ Kind='task'; Name=$TaskName; Xml=$(if ($holderTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }) } }
+        Apply = {
+            $taskUser = if ($LogonUser) { $LogonUser } else { "$env:USERDOMAIN\$env:USERNAME" }
+            $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+                -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
+            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+            $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive
+            # No time limit: the holder must live for the whole session, or the
+            # resolution request dies with it.
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+                -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+                -Principal $principal -Settings $settings -Force | Out-Null
+            Start-ScheduledTask -TaskName $TaskName
+        }
+    }
+    'dynamic-tick' = @{
+        Kind = 'bcd'
+        UndoEntry = { @{ Kind='bcd'; Name='disabledynamictick'; Previous=(ConvertTo-BcdBool $dynTick) } }
+        Apply = { Invoke-Bcdedit /set disabledynamictick yes | Out-Null }
+    }
+    'platform-tick' = @{
+        Kind = 'bcd'
+        UndoEntry = { @{ Kind='bcd'; Name='useplatformtick'; Previous=(ConvertTo-BcdBool $platTick) } }
+        Apply = { Invoke-Bcdedit /set useplatformtick yes | Out-Null }
+    }
+    'remove-platform-clock' = @{
+        Kind = 'bcd'
+        UndoEntry = { @{ Kind='bcd'; Name='useplatformclock'; Previous=(ConvertTo-BcdBool $platClock) } }
+        Apply = { Invoke-Bcdedit /deletevalue useplatformclock | Out-Null }
+    }
+}
+
 # ---- Backups BEFORE changing anything ----
+# The user may have sat in the grid for a while - re-read state so the undo
+# file records the actual pre-change values, not the ones from script start.
+Read-TimerTweakState
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $undoState = New-Object System.Collections.Generic.List[object]
-if ($selected | Where-Object { $_.Id -like '*tick*' -or $_.Id -eq 'remove-platform-clock' }) {
+if ($selected | Where-Object { $tweakDefs[$_.Id].Kind -eq 'bcd' }) {
     # Full BCD store export: last-resort rollback (bcdedit /import <file>) even
     # if the undo JSON is lost.
     $bcdBackup = Join-Path $PSScriptRoot "bcd_backup_$stamp"
-    bcdedit /export $bcdBackup | Out-Null
+    Invoke-Bcdedit /export $bcdBackup | Out-Null
     Write-Host "BCD store backed up: $bcdBackup" -ForegroundColor Cyan
 }
 
-foreach ($t in $selected) {
-    switch ($t.Id) {
-        'global-reg'            { $undoState.Add(@{ Kind='reg'; Path=$KernelKey; Value=$GlobalValue; Previous=$globalReq }) }
-        'holder-task'           { if (-not $holderTask) { $undoState.Add(@{ Kind='task'; Name=$TaskName }) } }
-        'dynamic-tick'          { $undoState.Add(@{ Kind='bcd'; Name='disabledynamictick'; Previous=$dynTick }) }
-        'platform-tick'         { $undoState.Add(@{ Kind='bcd'; Name='useplatformtick'; Previous=$platTick }) }
-        'remove-platform-clock' { $undoState.Add(@{ Kind='bcd'; Name='useplatformclock'; Previous=$platClock }) }
-    }
-}
+foreach ($t in $selected) { $undoState.Add((& $tweakDefs[$t.Id].UndoEntry)) }
 $undoFile = Join-Path $PSScriptRoot "timer_undo_$stamp.json"
 ConvertTo-Json $undoState -Depth 4 | Set-Content -Path $undoFile -Encoding UTF8
 Write-Host "Undo file saved: $undoFile (revert with -Undo)" -ForegroundColor Cyan
@@ -323,28 +407,10 @@ Write-Host ""
 # ---- Apply ----
 $needReboot = $false
 foreach ($t in $selected) {
+    $def = $tweakDefs[$t.Id]
     try {
-        switch ($t.Id) {
-            'global-reg' {
-                New-ItemProperty -Path $KernelKey -Name $GlobalValue -Value 1 -PropertyType DWord -Force | Out-Null
-                $needReboot = $true
-            }
-            'holder-task' {
-                $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
-                $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-                # No time limit: the holder must live for the whole session, or the
-                # resolution request dies with it.
-                $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
-                    -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-                Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-                    -Settings $settings -Force | Out-Null
-                Start-ScheduledTask -TaskName $TaskName
-            }
-            'dynamic-tick'          { bcdedit /set disabledynamictick yes | Out-Null; $needReboot = $true }
-            'platform-tick'         { bcdedit /set useplatformtick yes | Out-Null; $needReboot = $true }
-            'remove-platform-clock' { bcdedit /deletevalue useplatformclock | Out-Null; $needReboot = $true }
-        }
+        & $def.Apply
+        if ($def.Kind -ne 'task') { $needReboot = $true }
         Write-Host ("  [OK ] {0}" -f $t.Tweak) -ForegroundColor Green
     } catch {
         Write-Host ("  [ERR] {0}: {1}" -f $t.Tweak, $_) -ForegroundColor Red
