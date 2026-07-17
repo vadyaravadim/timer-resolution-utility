@@ -1,0 +1,357 @@
+<#
+.SYNOPSIS
+    Windows timer stack manager: timer resolution, dynamic tick, HPET.
+.DESCRIPTION
+    Shows the current state of the Windows timer stack (timer resolution,
+    bcdedit timer tweaks, HPET, Windows 11 global resolution requests),
+    measures real Sleep(1) precision, and applies the tweaks you select
+    in a grid — each one opt-in, with a JSON undo file and a full BCD
+    backup written before any change. Zero external dependencies.
+.PARAMETER Status
+    Show the timer status and exit (no tweak grid).
+.PARAMETER Measure
+    Benchmark Sleep(1) precision at the current and at the maximum timer
+    resolution, then exit. Does not require Administrator.
+.PARAMETER Samples
+    Sample count for -Measure (default 30).
+.PARAMETER Undo
+    Revert the changes recorded in the newest timer_undo_*.json file.
+.NOTES
+    bcdedit and registry changes need a reboot; the holder task takes
+    effect immediately.
+    After several runs, undo files are per-run snapshots: apply them
+    newest-to-oldest — only the oldest holds the original state.
+#>
+[CmdletBinding()]
+param(
+    [switch]$Status,
+    [switch]$Measure,
+    [int]$Samples = 30,
+    [switch]$Undo,
+    [switch]$Hold,      # internal: used by the scheduled task to keep max resolution requested
+    [switch]$Elevated   # internal: set by the self-elevation relaunch
+)
+
+$ErrorActionPreference = 'Stop'
+$TaskName = 'timer-resolution-utility-holder'
+$KernelKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel'
+$GlobalValue = 'GlobalTimerResolutionRequests'
+$IsWin11 = [Environment]::OSVersion.Version.Build -ge 22000
+
+# Keep the self-elevated window open so the user can read the output.
+function Wait-IfElevatedWindow {
+    if ($Elevated) { Read-Host "Press Enter to close" | Out-Null }
+}
+
+# Without this, an unhandled error closes the self-elevated window before
+# the user can read the message.
+trap {
+    Write-Host "ERROR: $_" -ForegroundColor Red
+    Wait-IfElevatedWindow
+    exit 1
+}
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class TimerNative {
+    [DllImport("ntdll.dll")]
+    public static extern int NtQueryTimerResolution(out uint min, out uint max, out uint cur);
+    [DllImport("ntdll.dll")]
+    public static extern int NtSetTimerResolution(uint desired, bool set, out uint cur);
+
+    // Measured in C#, not PowerShell: the interpreter adds jitter comparable
+    // to the sub-millisecond differences we are trying to show.
+    public static double[] MeasureSleep(int samples) {
+        Thread.Sleep(1);                       // warm-up: JIT + first-timer alignment
+        double[] r = new double[samples];
+        Stopwatch sw = new Stopwatch();
+        for (int i = 0; i < samples; i++) {
+            sw.Restart();
+            Thread.Sleep(1);
+            sw.Stop();
+            r[i] = sw.Elapsed.TotalMilliseconds;
+        }
+        return r;
+    }
+}
+"@
+
+function Get-TimerResolution {
+    $min = 0; $max = 0; $cur = 0
+    [void][TimerNative]::NtQueryTimerResolution([ref]$min, [ref]$max, [ref]$cur)
+    # Units are 100 ns; min = coarsest (default 15.625 ms), max = finest (usually 0.5 ms).
+    [PSCustomObject]@{ DefaultMs = $min / 10000; FinestMs = $max / 10000; CurrentMs = $cur / 10000 }
+}
+
+function Get-SleepStats([int]$Count) {
+    $d = [TimerNative]::MeasureSleep($Count)
+    $avg = ($d | Measure-Object -Average).Average
+    $var = ($d | ForEach-Object { [math]::Pow($_ - $avg, 2) } | Measure-Object -Average).Average
+    [PSCustomObject]@{
+        Avg = $avg; StDev = [math]::Sqrt($var)
+        Min = ($d | Measure-Object -Minimum).Minimum
+        Max = ($d | Measure-Object -Maximum).Maximum
+    }
+}
+
+# ---- Hold mode: run by the scheduled task, keeps max resolution requested ----
+# The request only lives as long as the requesting process, hence the loop.
+if ($Hold) {
+    $res = Get-TimerResolution
+    $cur = 0
+    [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $true, [ref]$cur)
+    while ($true) { Start-Sleep -Seconds 3600 }
+}
+
+# ---- Measure mode: no Administrator needed ----
+if ($Measure) {
+    $res = Get-TimerResolution
+    Write-Host ("Timer resolution: current {0:0.###} ms, finest supported {1:0.###} ms, OS default {2:0.###} ms" -f `
+        $res.CurrentMs, $res.FinestMs, $res.DefaultMs) -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Sleep(1) at the CURRENT resolution ($Samples samples):"
+    $before = Get-SleepStats $Samples
+    Write-Host ("  avg {0:0.000} ms | stdev {1:0.000} | min {2:0.000} | max {3:0.000}" -f `
+        $before.Avg, $before.StDev, $before.Min, $before.Max) -ForegroundColor Yellow
+
+    $cur = 0
+    [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $true, [ref]$cur)
+    Write-Host "Sleep(1) after requesting the FINEST resolution for this process:"
+    $after = Get-SleepStats $Samples
+    Write-Host ("  avg {0:0.000} ms | stdev {1:0.000} | min {2:0.000} | max {3:0.000}" -f `
+        $after.Avg, $after.StDev, $after.Min, $after.Max) -ForegroundColor Green
+    [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $false, [ref]$cur)
+
+    if ($IsWin11) {
+        $g = (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue
+        if ($g -ne 1) {
+            Write-Host ""
+            Write-Host "Note: since Windows 10 2004 a resolution request only affects the requesting process. To make requests system-wide again, apply the GlobalTimerResolutionRequests tweak (run without -Measure)." -ForegroundColor DarkGray
+        }
+    }
+    Wait-IfElevatedWindow
+    return
+}
+
+# ---- Everything below reads bcdedit / writes system state: Administrator required ----
+$principal = New-Object Security.Principal.WindowsPrincipal(
+    [Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "Not running as Administrator. Requesting elevation..." -ForegroundColor Yellow
+    try {
+        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+                     '-File', "`"$PSCommandPath`"", '-Elevated')
+        if ($Status) { $argList += '-Status' }
+        if ($Undo)   { $argList += '-Undo' }
+        Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs
+    } catch {
+        Write-Host "ERROR: elevation was refused. Run this script as Administrator." -ForegroundColor Red
+    }
+    return
+}
+
+# ---- Gather current state ----
+# Parsed by element NAME (locale-invariant); the Yes/No value column is
+# matched loosely because some localized builds translate it.
+$bcdRaw = @(bcdedit /enum "{current}" 2>&1)
+$bcdOk = ($LASTEXITCODE -eq 0)
+function Get-BcdValue([string]$Name) {
+    if (-not $bcdOk) { return $null }
+    foreach ($line in $bcdRaw) {
+        if ($line -match ('^\s*{0}\s+(\S+)\s*$' -f [regex]::Escape($Name))) { return $Matches[1] }
+    }
+    return $null
+}
+function Test-BcdOn($Value) { $Value -match '^(yes|да|oui|ja|s[ií]|sim|tak|evet)$' }
+
+$dynTick   = Get-BcdValue 'disabledynamictick'
+$platTick  = Get-BcdValue 'useplatformtick'
+$platClock = Get-BcdValue 'useplatformclock'
+$globalReq = (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue
+$holderTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+# HPET exposes ACPI ID PNP0103; absence just means the board doesn't expose it.
+$hpet = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstanceId -like 'ACPI\PNP0103*' } | Select-Object -First 1
+$res = Get-TimerResolution
+$quick = Get-SleepStats 10
+
+function Format-BcdState($Value, [string]$OnText, [string]$OffText) {
+    if ($null -eq $Value) { $OffText }
+    elseif (Test-BcdOn $Value) { $OnText }
+    else { "set to '$Value'" }
+}
+
+Write-Host ""
+Write-Host "=== Windows timer status ===" -ForegroundColor Cyan
+Write-Host ("Timer resolution   : current {0:0.###} ms | finest {1:0.###} ms | OS default {2:0.###} ms" -f `
+    $res.CurrentMs, $res.FinestMs, $res.DefaultMs)
+Write-Host ("Sleep(1) actually  : avg {0:0.000} ms (10 samples; run -Measure for a full benchmark)" -f $quick.Avg)
+if (-not $bcdOk) {
+    Write-Host "bcdedit values     : could not read BCD store" -ForegroundColor Yellow
+} else {
+    Write-Host ("Dynamic tick       : {0}" -f (Format-BcdState $dynTick 'DISABLED (disabledynamictick yes)' 'default (enabled)'))
+    Write-Host ("Platform tick      : {0}" -f (Format-BcdState $platTick 'FORCED (useplatformtick yes)' 'default (not forced)'))
+    Write-Host ("Forced HPET clock  : {0}" -f (Format-BcdState $platClock 'FORCED (useplatformclock yes) - outdated tweak, consider removing' 'not forced (good)'))
+}
+if ($hpet) { Write-Host ("HPET device        : present ({0})" -f $hpet.Status) }
+else       { Write-Host  "HPET device        : not exposed by this system" }
+if ($IsWin11) {
+    $gState = if ($globalReq -eq 1) { 'system-wide (1)' } else { 'not set - resolution requests are per-process (Win10 2004+ default)' }
+    Write-Host ("Global timer res   : {0}" -f $gState)
+}
+Write-Host ("Holder task        : {0}" -f $(if ($holderTask) { "installed ($($holderTask.State))" } else { 'not installed' }))
+Write-Host ""
+
+if ($Status) { Wait-IfElevatedWindow; return }
+
+# ---- Undo mode ----
+if ($Undo) {
+    $undoFile = Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 1
+    if (-not $undoFile) {
+        Write-Host "No timer_undo_*.json found next to the script - nothing to undo." -ForegroundColor Yellow
+        Wait-IfElevatedWindow; return
+    }
+    Write-Host "Reverting: $($undoFile.Name)" -ForegroundColor Cyan
+    foreach ($item in (Get-Content $undoFile.FullName -Raw | ConvertFrom-Json)) {
+        switch ($item.Kind) {
+            'bcd' {
+                if ($null -ne $item.Previous) { bcdedit /set $item.Name $item.Previous | Out-Null }
+                else { bcdedit /deletevalue $item.Name | Out-Null }
+                Write-Host "  [bcd ] $($item.Name) -> $(if ($null -ne $item.Previous) { $item.Previous } else { 'removed (default)' })" -ForegroundColor Green
+            }
+            'reg' {
+                if ($null -ne $item.Previous) {
+                    New-ItemProperty -Path $item.Path -Name $item.Value -Value $item.Previous -PropertyType DWord -Force | Out-Null
+                } else {
+                    Remove-ItemProperty -Path $item.Path -Name $item.Value -ErrorAction SilentlyContinue
+                }
+                Write-Host "  [reg ] $($item.Value) -> $(if ($null -ne $item.Previous) { $item.Previous } else { 'removed (default)' })" -ForegroundColor Green
+            }
+            'task' {
+                Unregister-ScheduledTask -TaskName $item.Name -Confirm:$false -ErrorAction SilentlyContinue
+                Write-Host "  [task] $($item.Name) removed" -ForegroundColor Green
+            }
+        }
+    }
+    Rename-Item $undoFile.FullName ($undoFile.FullName -replace '\.json$', '.applied.json')
+    Write-Host "Done. Reboot for bcdedit/registry reverts to take effect." -ForegroundColor Green
+    Wait-IfElevatedWindow; return
+}
+
+# ---- Build the tweak grid: each row is one opt-in change ----
+if (-not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
+    Write-Host "Out-GridView is not available in this PowerShell. Run the script with Windows PowerShell (powershell.exe), or install the Microsoft.PowerShell.GraphicalTools module." -ForegroundColor Red
+    Wait-IfElevatedWindow
+    return
+}
+
+$rows = New-Object System.Collections.Generic.List[object]
+if ($IsWin11) {
+    $rows.Add([PSCustomObject]@{
+        Id = 'global-reg'; Tweak = 'System-wide timer resolution requests'
+        Current = $(if ($globalReq -eq 1) { 'already 1' } else { 'not set (per-process)' })
+        Change = "$GlobalValue = 1"
+        Notes = 'Win11: makes 0.5 ms requests from any process (games, the holder task) apply system-wide, like before Win10 2004'
+    })
+}
+$rows.Add([PSCustomObject]@{
+    Id = 'holder-task'; Tweak = 'Hold finest timer resolution at logon'
+    Current = $(if ($holderTask) { 'installed' } else { 'not installed' })
+    Change = 'scheduled task (hidden, current user)'
+    Notes = "Open-source stand-in for TimerResolution.exe / ISLC$(if ($IsWin11) { '; on Win11 only matters together with the system-wide tweak' })"
+})
+if ($bcdOk) {
+    $rows.Add([PSCustomObject]@{
+        Id = 'dynamic-tick'; Tweak = 'Disable dynamic tick'
+        Current = $(if (Test-BcdOn $dynTick) { 'already disabled' } else { 'default (enabled)' })
+        Change = 'bcdedit /set disabledynamictick yes'
+        Notes = 'The most commonly beneficial bcdedit timer tweak; verify with -Measure before/after'
+    })
+    $rows.Add([PSCustomObject]@{
+        Id = 'platform-tick'; Tweak = 'Force fixed platform tick'
+        Current = $(if (Test-BcdOn $platTick) { 'already forced' } else { 'default' })
+        Change = 'bcdedit /set useplatformtick yes'
+        Notes = 'CONTESTED: helps some systems, causes mouse issues on others - measure, and undo if it feels worse'
+    })
+    if ($null -ne $platClock) {
+        $rows.Add([PSCustomObject]@{
+            Id = 'remove-platform-clock'; Tweak = 'Remove forced HPET clock'
+            Current = "useplatformclock set ('$platClock')"
+            Change = 'bcdedit /deletevalue useplatformclock'
+            Notes = 'Forcing HPET is outdated advice that increases latency on modern systems'
+        })
+    }
+}
+
+$selected = $rows | Out-GridView -Title 'Select timer tweaks to apply (Ctrl-click for multiple, Cancel = no changes)' -PassThru
+if (-not $selected) {
+    Write-Host "No tweaks selected. No changes made." -ForegroundColor Yellow
+    Wait-IfElevatedWindow
+    return
+}
+
+# ---- Backups BEFORE changing anything ----
+$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$undoState = New-Object System.Collections.Generic.List[object]
+if ($selected | Where-Object { $_.Id -like '*tick*' -or $_.Id -eq 'remove-platform-clock' }) {
+    # Full BCD store export: last-resort rollback (bcdedit /import <file>) even
+    # if the undo JSON is lost.
+    $bcdBackup = Join-Path $PSScriptRoot "bcd_backup_$stamp"
+    bcdedit /export $bcdBackup | Out-Null
+    Write-Host "BCD store backed up: $bcdBackup" -ForegroundColor Cyan
+}
+
+foreach ($t in $selected) {
+    switch ($t.Id) {
+        'global-reg'            { $undoState.Add(@{ Kind='reg'; Path=$KernelKey; Value=$GlobalValue; Previous=$globalReq }) }
+        'holder-task'           { if (-not $holderTask) { $undoState.Add(@{ Kind='task'; Name=$TaskName }) } }
+        'dynamic-tick'          { $undoState.Add(@{ Kind='bcd'; Name='disabledynamictick'; Previous=$dynTick }) }
+        'platform-tick'         { $undoState.Add(@{ Kind='bcd'; Name='useplatformtick'; Previous=$platTick }) }
+        'remove-platform-clock' { $undoState.Add(@{ Kind='bcd'; Name='useplatformclock'; Previous=$platClock }) }
+    }
+}
+$undoFile = Join-Path $PSScriptRoot "timer_undo_$stamp.json"
+ConvertTo-Json $undoState -Depth 4 | Set-Content -Path $undoFile -Encoding UTF8
+Write-Host "Undo file saved: $undoFile (revert with -Undo)" -ForegroundColor Cyan
+Write-Host ""
+
+# ---- Apply ----
+$needReboot = $false
+foreach ($t in $selected) {
+    try {
+        switch ($t.Id) {
+            'global-reg' {
+                New-ItemProperty -Path $KernelKey -Name $GlobalValue -Value 1 -PropertyType DWord -Force | Out-Null
+                $needReboot = $true
+            }
+            'holder-task' {
+                $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+                    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
+                $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+                # No time limit: the holder must live for the whole session, or the
+                # resolution request dies with it.
+                $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+                    -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+                Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+                    -Settings $settings -Force | Out-Null
+                Start-ScheduledTask -TaskName $TaskName
+            }
+            'dynamic-tick'          { bcdedit /set disabledynamictick yes | Out-Null; $needReboot = $true }
+            'platform-tick'         { bcdedit /set useplatformtick yes | Out-Null; $needReboot = $true }
+            'remove-platform-clock' { bcdedit /deletevalue useplatformclock | Out-Null; $needReboot = $true }
+        }
+        Write-Host ("  [OK ] {0}" -f $t.Tweak) -ForegroundColor Green
+    } catch {
+        Write-Host ("  [ERR] {0}: {1}" -f $t.Tweak, $_) -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+Write-Host "Done. Revert any time with: .\timer-resolution-utility.ps1 -Undo" -ForegroundColor Green
+if ($needReboot) { Write-Host "REBOOT REQUIRED for bcdedit/registry changes to take effect." -ForegroundColor Green }
+Wait-IfElevatedWindow
