@@ -73,7 +73,12 @@ if (-not $PSCommandPath) {
     # The piped text is not recoverable from inside iex ($MyInvocation there
     # holds the caller's command line, not the script body) - download the
     # script; the rerun below then binds the forwarded switches normally.
-    $body = Invoke-RestMethod 'https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1'
+    try {
+        $body = Invoke-RestMethod 'https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1' -TimeoutSec 30
+    } catch {
+        Write-Host "ERROR: could not download the script ($($_.Exception.Message)). Check your internet connection, or save the script to a file and run it from there." -ForegroundColor Red
+        return
+    }
     $saved = Join-Path $env:USERPROFILE 'timer-resolution-utility.ps1'
     if ((Test-Path $saved) -and ([IO.File]::ReadAllText($saved) -cne $body)) {
         Copy-Item $saved "$saved.bak" -Force
@@ -81,7 +86,9 @@ if (-not $PSCommandPath) {
     }
     [IO.File]::WriteAllText($saved, $body, [Text.Encoding]::UTF8)
     Write-Host "Script saved to: $saved (undo and backup files will be written next to it)" -ForegroundColor Cyan
-    $fwd = Get-ForwardedSwitchList
+    # @(): a single forwarded switch unrolls to a scalar, and splatting a
+    # scalar string breaks powershell.exe -File switch binding on PS 5.1.
+    $fwd = @(Get-ForwardedSwitchList)
     powershell -NoProfile -ExecutionPolicy Bypass -File $saved @fwd
     # The rerun's exit code stays in $LASTEXITCODE for scripted callers.
     return
@@ -191,7 +198,9 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
                      '-LogonUser', "`"$env:USERDOMAIN\$env:USERNAME`"") + (Get-ForwardedSwitchList)
         Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs
     } catch {
-        Write-Host "ERROR: elevation was refused. Run this script as Administrator." -ForegroundColor Red
+        # Not always a refusal (UAC service disabled, ...) - show the real cause.
+        Write-Host "ERROR: elevation failed ($($_.Exception.Message)). Run this script as Administrator." -ForegroundColor Red
+        Read-Host "Press Enter to close" | Out-Null
     }
     return
 }
