@@ -388,7 +388,15 @@ $tweakDefs = @{
 # The user may have sat in the grid for a while - re-read state so the undo
 # file records the actual pre-change values, not the ones from script start.
 Read-TimerTweakState
-$stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+# The suffix loop keeps two runs within the same second from clobbering the
+# previous run's undo/backup files; the json and BCD backup share one stamp.
+$base = Get-Date -Format 'yyyyMMdd_HHmmss'
+$stamp = $base
+$n = 1
+while ((Test-Path (Join-Path $PSScriptRoot "timer_undo_$stamp.json")) -or
+       (Test-Path (Join-Path $PSScriptRoot "bcd_backup_$stamp"))) {
+    $stamp = '{0}_{1}' -f $base, $n++
+}
 $undoState = New-Object System.Collections.Generic.List[object]
 if ($selected | Where-Object { $tweakDefs[$_.Id].Kind -eq 'bcd' }) {
     # Full BCD store export: last-resort rollback (bcdedit /import <file>) even
