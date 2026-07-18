@@ -70,16 +70,16 @@ function Get-ForwardedSwitchList {
 # path is required: save the script to the user profile and rerun it from
 # there (the rerun handles elevation).
 if (-not $PSCommandPath) {
-    # Persist the text that is actually executing, not a re-download: what the
-    # user piped in - a fork, a branch, a local copy - is what must run.
-    $body = $MyInvocation.MyCommand.Definition
-    if (-not $body) { throw "Cannot recover the executing script text; save the script to a file and run it with -File." }
+    # The piped text is not recoverable from inside iex ($MyInvocation there
+    # holds the caller's command line, not the script body) - download the
+    # script; the rerun below then binds the forwarded switches normally.
+    $body = Invoke-RestMethod 'https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1'
     $saved = Join-Path $env:USERPROFILE 'timer-resolution-utility.ps1'
     if ((Test-Path $saved) -and ([IO.File]::ReadAllText($saved) -cne $body)) {
         Copy-Item $saved "$saved.bak" -Force
         Write-Host "Existing $saved differs - previous copy kept as $saved.bak" -ForegroundColor Yellow
     }
-    [IO.File]::WriteAllText($saved, $body, [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText($saved, $body, [Text.Encoding]::UTF8)
     Write-Host "Script saved to: $saved (undo and backup files will be written next to it)" -ForegroundColor Cyan
     $fwd = Get-ForwardedSwitchList
     powershell -NoProfile -ExecutionPolicy Bypass -File $saved @fwd

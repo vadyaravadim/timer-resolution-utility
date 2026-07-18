@@ -47,7 +47,7 @@ Holder task        : not installed
 irm https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1 | iex
 ```
 
-The script saves itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
+The script downloads itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
 
 **Or clone:**
 
