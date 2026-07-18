@@ -44,10 +44,10 @@ Holder task        : not installed
 **One-liner** instead (in any PowerShell — it self-elevates):
 
 ```powershell
-irm https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1 -OutFile "$env:USERPROFILE\timer-resolution-utility.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\timer-resolution-utility.ps1"
+irm https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1 | iex
 ```
 
-The script is saved to your user profile (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
+The script saves itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
 
 **Or clone:**
 

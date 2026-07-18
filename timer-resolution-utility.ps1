@@ -1,11 +1,11 @@
-﻿<#
+<#
 .SYNOPSIS
     Windows timer stack manager: timer resolution, dynamic tick, HPET.
 .DESCRIPTION
     Shows the current state of the Windows timer stack (timer resolution,
     bcdedit timer tweaks, HPET, Windows 11 global resolution requests),
     measures real Sleep(1) precision, and applies the tweaks you select
-    in a grid — each one opt-in, with a JSON undo file and a full BCD
+    in a grid - each one opt-in, with a JSON undo file and a full BCD
     backup written before any change. Zero external dependencies.
 .PARAMETER Status
     Show the timer status and exit (no tweak grid).
@@ -20,7 +20,7 @@
     bcdedit and registry changes need a reboot; the holder task takes
     effect immediately.
     After several runs, undo files are per-run snapshots: apply them
-    newest-to-oldest — only the oldest holds the original state.
+    newest-to-oldest - only the oldest holds the original state.
 #>
 [CmdletBinding()]
 param(
@@ -49,7 +49,42 @@ function Wait-IfElevatedWindow {
 trap {
     Write-Host "ERROR: $_" -ForegroundColor Red
     Wait-IfElevatedWindow
-    exit 1
+    # Under `irm | iex` this runs inside the user's own session, where `exit`
+    # would close their console - rethrow so only the piped script stops.
+    if ($PSCommandPath) { exit 1 }
+    break
+}
+
+# Mode switches forwarded on every relaunch (the irm|iex bootstrap rerun below
+# and the self-elevation later) - one list so neither path can silently drop one.
+function Get-ForwardedSwitchList {
+    $a = @()
+    if ($Status)  { $a += '-Status' }
+    if ($Measure) { $a += '-Measure', '-Samples', $Samples }
+    if ($Undo)    { $a += '-Undo' }
+    $a
+}
+
+# Launched via `irm <url> | iex` - no file on disk. The undo/BCD-backup files
+# are written next to the script and the holder task points at it, so a stable
+# path is required: save the script to the user profile and rerun it from
+# there (the rerun handles elevation).
+if (-not $PSCommandPath) {
+    # Persist the text that is actually executing, not a re-download: what the
+    # user piped in - a fork, a branch, a local copy - is what must run.
+    $body = $MyInvocation.MyCommand.Definition
+    if (-not $body) { throw "Cannot recover the executing script text; save the script to a file and run it with -File." }
+    $saved = Join-Path $env:USERPROFILE 'timer-resolution-utility.ps1'
+    if ((Test-Path $saved) -and ([IO.File]::ReadAllText($saved) -cne $body)) {
+        Copy-Item $saved "$saved.bak" -Force
+        Write-Host "Existing $saved differs - previous copy kept as $saved.bak" -ForegroundColor Yellow
+    }
+    [IO.File]::WriteAllText($saved, $body, [Text.Encoding]::ASCII)
+    Write-Host "Script saved to: $saved (undo and backup files will be written next to it)" -ForegroundColor Cyan
+    $fwd = Get-ForwardedSwitchList
+    powershell -NoProfile -ExecutionPolicy Bypass -File $saved @fwd
+    # The rerun's exit code stays in $LASTEXITCODE for scripted callers.
+    return
 }
 
 Add-Type -TypeDefinition @"
@@ -153,9 +188,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
         # account $env:USERNAME changes, and the holder task would bind to it.
         $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
                      '-File', "`"$PSCommandPath`"", '-Elevated',
-                     '-LogonUser', "`"$env:USERDOMAIN\$env:USERNAME`"")
-        if ($Status) { $argList += '-Status' }
-        if ($Undo)   { $argList += '-Undo' }
+                     '-LogonUser', "`"$env:USERDOMAIN\$env:USERNAME`"") + (Get-ForwardedSwitchList)
         Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Verb RunAs
     } catch {
         Write-Host "ERROR: elevation was refused. Run this script as Administrator." -ForegroundColor Red
@@ -173,13 +206,16 @@ function Get-BcdValue([string]$Name) {
     }
     return $null
 }
-function Test-BcdOn($Value) { $Value -match '^(yes|да|oui|ja|s[ií]|sim|tak|evet)$' }
+# Localized letters are \uXXXX regex escapes so the file stays pure ASCII:
+# a BOM breaks `irm | iex` (the parser chokes on a leading U+FEFF), and
+# non-ASCII literals in a BOM-less file break -File runs under PS 5.1.
+function Test-BcdOn($Value) { $Value -match '^(yes|\u0434\u0430|oui|ja|s[i\u00ed]|sim|tak|evet)$' }
 # bcdedit /set only accepts invariant tokens, so undo must not replay a
 # localized Yes/No captured from /enum output - canonicalize when recognized.
 function ConvertTo-BcdBool($Value) {
     if ($null -eq $Value) { $null }
     elseif (Test-BcdOn $Value) { 'yes' }
-    elseif ($Value -match '^(no|нет|non|nein|n[aã]o|nie|hay[ıi]r)$') { 'no' }
+    elseif ($Value -match '^(no|\u043d\u0435\u0442|non|nein|n[a\u00e3]o|nie|hay[\u0131i]r)$') { 'no' }
     else { $Value }
 }
 function Invoke-Bcdedit {
