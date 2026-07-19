@@ -1,3 +1,35 @@
+<#PSScriptInfo
+
+.VERSION 1.0.0
+
+.GUID d6d491d2-400a-47a4-a2c6-e865a634b830
+
+.AUTHOR vadyaravadim
+
+.COMPANYNAME
+
+.COPYRIGHT
+
+.TAGS Windows Windows10 Windows11 Gaming TimerResolution HPET DynamicTick Latency Performance Stutter Tweak
+
+.LICENSEURI https://github.com/vadyaravadim/timer-resolution-utility/blob/main/LICENSE
+
+.PROJECTURI https://github.com/vadyaravadim/timer-resolution-utility
+
+.ICONURI
+
+.EXTERNALMODULEDEPENDENCIES
+
+.REQUIREDSCRIPTS
+
+.EXTERNALSCRIPTDEPENDENCIES
+
+.RELEASENOTES
+
+.PRIVATEDATA
+
+#>
+
 <#
 .SYNOPSIS
     Windows timer stack manager: timer resolution, dynamic tick, HPET.
