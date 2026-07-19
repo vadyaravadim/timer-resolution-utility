@@ -12,6 +12,7 @@ Zero install. Zero dependencies. Zero binaries. Built-in undo.
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://www.microsoft.com/windows)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?logo=powershell&logoColor=white)](https://docs.microsoft.com/en-us/powershell/)
 [![Latest release](https://img.shields.io/github/v/release/vadyaravadim/timer-resolution-utility)](https://github.com/vadyaravadim/timer-resolution-utility/releases)
+[![PowerShell Gallery](https://img.shields.io/powershellgallery/v/timer-resolution-utility?logo=powershell&label=PS%20Gallery)](https://www.powershellgallery.com/packages/timer-resolution-utility)
 ![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)
 
 </div>
@@ -41,6 +42,16 @@ Holder task        : not installed
 3. Click **Yes** on the UAC prompt (the script requests admin rights on its own).
 4. Read the status block, then `Ctrl`-click the tweaks you want in the grid and click **OK**.
 5. **Reboot** (for the bcdedit / registry tweaks; the resolution holder works immediately).
+
+**Or from the PowerShell Gallery:**
+
+```powershell
+Install-Script timer-resolution-utility
+timer-resolution-utility             # then run it by name (open a NEW PowerShell window first, so the Scripts folder is on PATH)
+timer-resolution-utility -Measure    # switches work directly: -Status, -Measure, -Undo
+```
+
+The script self-elevates. Update later with `Update-Script timer-resolution-utility`.
 
 **One-liner** instead (in any PowerShell — it self-elevates):
 
