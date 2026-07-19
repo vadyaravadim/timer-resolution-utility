@@ -7,11 +7,12 @@
 An open-source PowerShell script for the whole Windows timer stack: view and set **timer resolution**, apply the **`disabledynamictick` / `useplatformtick` bcdedit tweaks**, un-force **HPET** — with a built-in `Sleep(1)` benchmark that shows the real effect on *your* hardware. A transparent alternative to the closed-source `TimerResolution.exe` from forum threads.
 Zero install. Zero dependencies. Zero binaries. Built-in undo.
 
+[![lint](https://img.shields.io/github/actions/workflow/status/vadyaravadim/timer-resolution-utility/lint.yml?label=lint&logo=powershell)](https://github.com/vadyaravadim/timer-resolution-utility/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://www.microsoft.com/windows)
-[![PowerShell](https://img.shields.io/badge/PowerShell-5.1-5391FE?logo=powershell&logoColor=white)](https://docs.microsoft.com/en-us/powershell/)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?logo=powershell&logoColor=white)](https://docs.microsoft.com/en-us/powershell/)
 [![Latest release](https://img.shields.io/github/v/release/vadyaravadim/timer-resolution-utility)](https://github.com/vadyaravadim/timer-resolution-utility/releases)
-![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)
+![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/=social)
 
 </div>
 
