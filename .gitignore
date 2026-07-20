@@ -1,0 +1,4 @@
+timer_undo_*.json
+.vs/
+.vscode/
+.claude/
