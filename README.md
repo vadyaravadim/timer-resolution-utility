@@ -71,6 +71,10 @@ However you launch it:
 2. Read the status block, then `Ctrl`-click the tweaks you want in the grid and click **OK**.
 3. **Reboot** (for the bcdedit / registry tweaks; the resolution holder works immediately).
 
+![The tweak picker: a grid listing each timer tweak with its current state, the exact change it applies, and notes - nothing is applied until you select it and click OK](assets/grid.png)
+
+> Every row is opt-in and shows the exact command it will run. There is no "apply all" button, and **Cancel** changes nothing.
+
 ### Switches
 
 | Switch | Effect |
