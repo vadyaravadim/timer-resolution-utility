@@ -181,11 +181,19 @@ if ($Hold) {
     $res = Get-TimerResolution
     $desired = [uint32]($res.FinestMs * 10000)
     $cur = 0
+    # Stopping the task kills the process the scheduler launched - the conhost
+    # wrapper, not this one. A holder that ignored its parent would survive both
+    # Stop and Undo and keep the resolution held until reboot, with no window and
+    # no task left to stop it by.
+    $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
     # Re-assert every hour: Win11 can coalesce/ignore requests from background
     # processes, and a periodic re-request costs nothing.
     while ($true) {
         [void][TimerNative]::NtSetTimerResolution($desired, $true, [ref]$cur)
-        Start-Sleep -Seconds 3600
+        foreach ($tick in 1..120) {
+            Start-Sleep -Seconds 30
+            if (-not (Get-Process -Id $parentId -ErrorAction SilentlyContinue)) { return }
+        }
     }
 }
 
@@ -202,11 +210,23 @@ if ($Measure) {
 
     $cur = 0
     [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $true, [ref]$cur)
+    # What the kernel actually granted; read before the release call below
+    # overwrites it.
+    $heldMs = $cur / 10000
     Write-Host "Sleep(1) after requesting the FINEST resolution for this process:"
     $after = Get-SleepStats $Samples
     Write-Host ("  avg {0:0.000} ms | stdev {1:0.000} | min {2:0.000} | max {3:0.000}" -f `
         $after.Avg, $after.StDev, $after.Min, $after.Max) -ForegroundColor Green
     [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $false, [ref]$cur)
+
+    # The request changes nothing when someone already holds the finest
+    # resolution - the holder task, a game, a browser. Both runs then measured
+    # the same state, and without saying so the two lines read as a before/after
+    # whose measurement noise looks like a regression.
+    if ($heldMs -eq $res.CurrentMs) {
+        Write-Host ""
+        Write-Host ("Both runs measured at {0:0.###} ms: the request changed nothing because something already holds that resolution (the holder task, a game, a browser). The difference between the two lines is measurement noise - stop that holder for a real before/after." -f $heldMs) -ForegroundColor DarkGray
+    }
 
     if ($IsWin11) {
         $g = (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue
