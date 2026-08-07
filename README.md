@@ -137,7 +137,7 @@ HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel
     Value: GlobalTimerResolutionRequests (DWORD) 1 = system-wide
 ```
 
-- The **holder task** (`timer-resolution-utility-holder`) runs this same script with `-Hold` at logon, hidden, and just keeps the finest resolution requested
+- The **holder task** (`timer-resolution-utility-holder`) runs this same script with `-Hold` at logon and just keeps the finest resolution requested. On Windows 10 1809+ it runs inside `conhost --headless`, so there is no console window even when Windows Terminal is the default terminal (`-WindowStyle Hidden` alone cannot hide a delegated terminal window); on older builds, which have neither ConPTY nor terminal delegation, it falls back to `-WindowStyle Hidden`
 
 ## Verify
 

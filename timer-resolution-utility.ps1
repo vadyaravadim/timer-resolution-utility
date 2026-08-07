@@ -433,14 +433,32 @@ $tweakDefs = @{
         UndoEntry = { @{ Kind='task'; Name=$TaskName; Xml=$(if ($holderTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }) } }
         Apply = {
             $taskUser = if ($LogonUser) { $LogonUser } else { "$env:USERDOMAIN\$env:USERNAME" }
-            $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
+            # Run under conhost --headless, not powershell -WindowStyle Hidden:
+            # that switch only hides powershell's OWN console window, and when the
+            # user has a delegated default terminal (Windows Terminal) the window
+            # belongs to another process - the holder then sits in a visible, empty
+            # tab for the whole session. --headless creates a console with no window
+            # at all, whatever the default terminal is.
+            # It is ConPTY though (Win10 1809 / build 17763 and up); older builds
+            # predate both ConPTY and terminal delegation, so there Hidden does hide
+            # the window and is the only option that starts at all.
+            $action = if ([Environment]::OSVersion.Version.Build -ge 17763) {
+                New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" `
+                    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Hold"
+            } else {
+                New-ScheduledTaskAction -Execute 'powershell.exe' `
+                    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
+            }
             $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
             $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive
             # No time limit: the holder must live for the whole session, or the
             # resolution request dies with it.
             $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
                 -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+            # Reinstalling over a running holder: the old process would outlive the
+            # new definition, and MultipleInstancesPolicy (IgnoreNew by default)
+            # would make the Start below a no-op until the next logon.
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
             Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
                 -Principal $principal -Settings $settings -Force | Out-Null
             Start-ScheduledTask -TaskName $TaskName
