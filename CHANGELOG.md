@@ -94,61 +94,98 @@ went backwards once, so release order and version order disagree in this reposit
 ### Added
 
 - The tool runs from a one-line `irm ... | iex` command. A piped run has no file on disk, and this tool
-  writes its undo and BCD backup files next to the script and points the holder task at it, so the run
-  saves itself into your user profile first and reruns from there. An existing copy that differs is kept as
-  `.bak` rather than overwritten, and `-Status` / `-Measure` / `-Samples` / `-Undo` carry through both the
-  rerun and the UAC prompt through one shared list, so neither path can drop them.
+  writes its `timer_undo_*.json` and BCD backup files next to the script and points the holder task at it,
+  so the run saves itself to `%USERPROFILE%\timer-resolution-utility.ps1` first and reruns from there,
+  elevating from the rerun as usual. What it saves is meant to be the exact text you piped in - a fork, a
+  branch, or a local copy rather than a re-download of `main`.
+- An existing copy at that path that differs is kept as `.bak` rather than overwritten.
+- `-Status` / `-Measure` / `-Samples` / `-Undo` carry through both the bootstrap rerun and the UAC prompt
+  through one shared list, so neither path can drop them.
+
+### Changed
+
+- The README Quick Start is now the plain `irm ... | iex` one-liner, because the script saves itself.
 
 ### Fixed
 
-- An error under `irm | iex` closed your console. The script's error trap called `exit`, which in a piped
-  run ends the session it was piped into rather than the script; it now stops only itself.
-- The script is now pure ASCII with no BOM: a BOM breaks `irm | iex`, and non-ASCII in a BOM-less file
-  breaks the `-File` path under Windows PowerShell 5.1. The localized `bcdedit` tokens it matches on are
-  written as `\uXXXX` escapes, and a CI check keeps the file that way.
+- An error under `irm | iex` closed your console. The script's error trap called `exit 1`, which in a piped
+  run ends the session it was piped into rather than the script; it now rethrows the error instead, so it
+  stops only itself.
+- The script is now pure ASCII with no BOM, reversing the UTF-8 BOM 1.1.0 shipped: a BOM breaks
+  `irm | iex`, and non-ASCII in a BOM-less file breaks the `-File` path under Windows PowerShell 5.1. The
+  localized `bcdedit` tokens it matches on are written as `\uXXXX` escapes, and an `ascii-check` CI
+  workflow keeps the file that way.
 
 ## [1.1.1] - 2026-07-18
+
+### Changed
+
+- The README's Related section now links GameDVR & FSO Disabler and Interrupt Affinity Utility.
 
 ### Fixed
 
 - Two runs within the same second silently destroyed the first run's undo file and BCD backup. Both are
   named from a whole-second timestamp and were overwritten without asking, so what you would have reverted
-  with was gone. Colliding names now get a numeric suffix.
+  with was gone. Colliding names now get a numeric suffix - `_1`, `_2`, and so on, the first one free.
 
 ## [1.1.0] - 2026-07-18
 
+Reliability release: every finding from a deep code review of the first release is fixed here.
+
+### Changed
+
+- The per-tweak backup, undo and apply logic now lives in a single definition table, so there is one place
+  to extend and nothing to drift apart.
+
 ### Fixed
 
-- A failing `bcdedit` was reported as `[OK]`. Exit codes are now checked everywhere the script shells out
-  to it - applying, reverting, and exporting the BCD - so a change that did not happen is no longer
-  reported as one that did.
-- Repeated `-Undo` re-picked the same snapshot instead of walking back through the chain. Undo now excludes
-  files it has already applied, sorts by the timestamp in the name, and reports how many older snapshots
-  remain after each step.
+- A failing `bcdedit` was reported as `[OK]`. Windows PowerShell 5.1 never throws on a native command's
+  nonzero exit code, so a locked or corrupt BCD store still printed `[OK]` and "REBOOT REQUIRED". Exit
+  codes are now checked everywhere the script shells out to it - applying, reverting, and exporting the
+  BCD - and the real error is surfaced, so a change that did not happen is no longer reported as one that
+  did.
+- Repeated `-Undo` re-picked the same snapshot instead of walking back through the chain: the
+  `timer_undo_*.json` filter also matched the `*.applied.json` files an undo leaves behind, so the same
+  file kept being re-applied. Undo now excludes files it has already applied, sorts by the timestamp in the
+  name, and reports how many older snapshots remain after each step.
 - The holder task was registered against the elevated administrator account rather than the user who
-  launched it, so it did not run at that user's logon.
-- A holder task you already had was destroyed on reinstall. Its definition is now saved into the undo file
-  and restored on `-Undo`.
+  launched it, so it did not run at that user's logon. It bit when a standard user elevated with a separate
+  admin account: both the logon trigger and the principal were created for the admin. The pre-elevation
+  user is now carried through the relaunch and the task gets an explicit Interactive principal.
+- A holder task you already had was destroyed when you re-selected the holder tweak. The existing task's
+  XML is now saved into the undo file, and `-Undo` restores that definition instead of just deleting the
+  task.
 - Undo recorded the wrong "previous" values when the system changed between the scan and your selection in
-  the grid; state is re-read after selection now.
-- Localized `bcdedit` Yes/No values are canonicalized before being stored as the previous value, so an undo
-  written on a non-English Windows restores the right thing. Values the script does not recognize are shown
-  verbatim in the grid rather than being guessed at.
+  the grid; state is re-read after the grid closes now.
+- Localized `bcdedit` Yes/No values are canonicalized before being stored as the previous value, because
+  `bcdedit /set` accepts only the invariant tokens - so an undo written on a non-English Windows restores
+  the right thing. Values the script does not recognize are shown verbatim in the grid rather than
+  masquerading as "default".
 - Windows 11 coalesces background timer-resolution requests, which let the held resolution slip. `-Hold`
-  now re-asserts the request hourly, and the status output states the limitation.
+  now re-asserts the request hourly, and the status output flags when the holder has no system-wide effect
+  yet.
+- Windows PowerShell 5.1 misread the script's non-ASCII regex tokens - the ones that match localized
+  `bcdedit` output. As of this release the file ships as UTF-8 with a BOM, so `powershell.exe` parses them
+  correctly.
 
 ## [1.0.0] - 2026-07-17
 
 ### Added
 
-- First release. Shows the state of the whole Windows timer stack - timer resolution, the `bcdedit` timer
-  tweaks, HPET, and the Windows 11 global resolution requests - measures real `Sleep(1)` precision, and
-  applies the tweaks you pick in a grid. Every tweak is opt-in.
+- First public release. Shows the state of the whole Windows timer stack - timer resolution, dynamic tick,
+  platform tick, HPET, and the Windows 11 `GlobalTimerResolutionRequests` - measures real `Sleep(1)`
+  precision, and applies the tweaks you pick in a grid. `disabledynamictick`, `useplatformtick` and
+  un-forcing HPET are each opt-in; there is no "apply all".
+- Holds 0.5 ms timer resolution through a hidden scheduled task - pure PowerShell, no binary. On Windows 11
+  the hold reaches the whole system only together with the system-wide registry tweak.
 - Writes a JSON undo file and a full BCD backup before any change, and `-Undo` reverts the newest snapshot.
 - `-Status` prints the timer state and exits; `-Measure` benchmarks `Sleep(1)` precision at the current and
-  at the maximum resolution and does not need Administrator rights.
-- Self-elevates through UAC. Zero external dependencies. The `bcdedit` and registry changes need a reboot;
-  the holder task takes effect immediately.
+  at the maximum resolution, so you can verify every tweak on your own hardware, and it does not need
+  Administrator rights.
+- Self-elevates through UAC. Zero external dependencies. A `Run.bat` ships alongside the script for a
+  double-click start. The `bcdedit` and registry changes need a reboot; the holder task takes effect
+  immediately.
+- An open-source alternative to the closed-source TimerResolution.exe and ISLC.
 
 [Unreleased]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.0...HEAD
 [1.3.0]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.2.3...v1.3.0
