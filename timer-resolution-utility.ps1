@@ -48,11 +48,17 @@
     Sample count for -Measure (default 30).
 .PARAMETER Undo
     Revert the changes recorded in the newest timer_undo_*.json file.
+.PARAMETER Reset
+    Clear every value this script can set back to the Windows default,
+    without going through the undo files. Asks for confirmation and
+    snapshots the current state first.
 .NOTES
     bcdedit and registry changes need a reboot; the holder task takes
     effect immediately.
     After several runs, undo files are per-run snapshots: apply them
-    newest-to-oldest - only the oldest holds the original state.
+    newest-to-oldest - only the oldest holds the original state. If that
+    chain is broken (a snapshot deleted, or the first one taken over an
+    already tweaked system), -Reset is the way back to the defaults.
 #>
 [CmdletBinding()]
 param(
@@ -60,6 +66,7 @@ param(
     [switch]$Measure,
     [int]$Samples = 30,
     [switch]$Undo,
+    [switch]$Reset,
     [switch]$Hold,      # internal: used by the scheduled task to keep max resolution requested
     [switch]$Elevated,  # internal: set by the self-elevation relaunch
     [string]$LogonUser  # internal: the pre-elevation user, for the holder task binding
@@ -94,6 +101,7 @@ function Get-ForwardedSwitchList {
     if ($Status)  { $a += '-Status' }
     if ($Measure) { $a += '-Measure', '-Samples', $Samples }
     if ($Undo)    { $a += '-Undo' }
+    if ($Reset)   { $a += '-Reset' }
     $a
 }
 
@@ -338,19 +346,11 @@ Write-Host ""
 
 if ($Status) { Wait-IfElevatedWindow; return }
 
-# ---- Undo mode ----
-if ($Undo) {
-    # -Filter also matches renamed *.applied.json files, so exclude them, and
-    # sort by the name stamp - LastWriteTime survives renames and can mislead.
-    $undoFile = Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -notmatch '\.applied\.json$' } |
-        Sort-Object Name | Select-Object -Last 1
-    if (-not $undoFile) {
-        Write-Host "No timer_undo_*.json found next to the script - nothing to undo." -ForegroundColor Yellow
-        Wait-IfElevatedWindow; return
-    }
-    Write-Host "Reverting: $($undoFile.Name)" -ForegroundColor Cyan
-    foreach ($item in (Get-Content $undoFile.FullName -Raw | ConvertFrom-Json)) {
+# Restores each record to the state it describes: a null Previous/Xml means the
+# value was absent, i.e. the Windows default. -Reset feeds it records built that
+# way on purpose, so both paths share one revert engine.
+function Invoke-UndoEntries([object[]]$Entries) {
+    foreach ($item in $Entries) {
         switch ($item.Kind) {
             'bcd' {
                 if ($null -ne $item.Previous) { Invoke-Bcdedit /set $item.Name $item.Previous | Out-Null }
@@ -366,6 +366,12 @@ if ($Undo) {
                 Write-Host "  [reg ] $($item.Value) -> $(if ($null -ne $item.Previous) { $item.Previous } else { 'removed (default)' })" -ForegroundColor Green
             }
             'task' {
+                # Neither Unregister nor Register -Force terminates a running
+                # instance, and the holder keeps the resolution requested for as
+                # long as its process lives - without this it would hold it until
+                # reboot, with no task left to stop it by. Stop kills the conhost
+                # wrapper; the holder follows within one 30 s tick (see -Hold).
+                Stop-ScheduledTask -TaskName $item.Name -ErrorAction SilentlyContinue
                 if ($item.Xml) {
                     Register-ScheduledTask -TaskName $item.Name -Xml $item.Xml -Force | Out-Null
                     Write-Host "  [task] $($item.Name) restored to previous definition" -ForegroundColor Green
@@ -376,6 +382,23 @@ if ($Undo) {
             }
         }
     }
+}
+
+# ---- Undo mode ----
+if ($Undo) {
+    # -Filter also matches renamed *.applied.json files, so exclude them, and
+    # sort by the name stamp - LastWriteTime survives renames and can mislead.
+    $undoFile = Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch '\.applied\.json$' } |
+        Sort-Object Name | Select-Object -Last 1
+    if (-not $undoFile) {
+        Write-Host "No timer_undo_*.json found next to the script - nothing to undo. Use -Reset to clear everything back to the Windows defaults." -ForegroundColor Yellow
+        Wait-IfElevatedWindow; return
+    }
+    Write-Host "Reverting: $($undoFile.Name)" -ForegroundColor Cyan
+    # No @() around it: ConvertFrom-Json hands back the whole array as one object
+    # on PS 5.1, so wrapping it would pass a single nested array instead of records.
+    Invoke-UndoEntries (Get-Content $undoFile.FullName -Raw | ConvertFrom-Json)
     Rename-Item $undoFile.FullName ($undoFile.FullName -replace '\.json$', '.applied.json')
     $remaining = @(Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch '\.applied\.json$' })
@@ -383,6 +406,142 @@ if ($Undo) {
         Write-Host "$($remaining.Count) older undo file(s) remain - run -Undo again to revert earlier runs." -ForegroundColor Yellow
     }
     Write-Host "Done. Reboot for bcdedit/registry reverts to take effect." -ForegroundColor Green
+    Wait-IfElevatedWindow; return
+}
+
+# One definition per tweak id: backup kind, "already in place" test, undo record,
+# and apply step live together so a new tweak cannot desync them.
+$tweakDefs = @{
+    'global-reg' = @{
+        Kind = 'reg'
+        IsApplied = { $globalReq -eq 1 }
+        UndoEntry = { @{ Kind='reg'; Path=$KernelKey; Value=$GlobalValue; Previous=$globalReq } }
+        Apply = { New-ItemProperty -Path $KernelKey -Name $GlobalValue -Value 1 -PropertyType DWord -Force | Out-Null }
+    }
+    'holder-task' = @{
+        Kind = 'task'
+        # Never a no-op: reinstalling rewrites the script path and the action, which
+        # is how a task left behind by an older install location gets fixed.
+        IsApplied = { $false }
+        # Xml of a pre-existing task lets -Undo restore it instead of losing it
+        # to Register-ScheduledTask -Force.
+        UndoEntry = { @{ Kind='task'; Name=$TaskName; Xml=$(if ($holderTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }) } }
+        Apply = {
+            $taskUser = if ($LogonUser) { $LogonUser } else { "$env:USERDOMAIN\$env:USERNAME" }
+            # Run under conhost --headless, not powershell -WindowStyle Hidden:
+            # that switch only hides powershell's OWN console window, and when the
+            # user has a delegated default terminal (Windows Terminal) the window
+            # belongs to another process - the holder then sits in a visible, empty
+            # tab for the whole session. --headless creates a console with no window
+            # at all, whatever the default terminal is.
+            # It is ConPTY though (Win10 1809 / build 17763 and up); older builds
+            # predate both ConPTY and terminal delegation, so there Hidden does hide
+            # the window and is the only option that starts at all.
+            $action = if ([Environment]::OSVersion.Version.Build -ge 17763) {
+                New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" `
+                    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Hold"
+            } else {
+                New-ScheduledTaskAction -Execute 'powershell.exe' `
+                    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
+            }
+            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+            $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive
+            # No time limit: the holder must live for the whole session, or the
+            # resolution request dies with it.
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+                -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+            # Reinstalling over a running holder: the old process would outlive the
+            # new definition, and MultipleInstancesPolicy (IgnoreNew by default)
+            # would make the Start below a no-op until the next logon.
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+                -Principal $principal -Settings $settings -Force | Out-Null
+            Start-ScheduledTask -TaskName $TaskName
+        }
+    }
+    'dynamic-tick' = @{
+        Kind = 'bcd'
+        IsApplied = { Test-BcdOn $dynTick }
+        UndoEntry = { @{ Kind='bcd'; Name='disabledynamictick'; Previous=(ConvertTo-BcdBool $dynTick) } }
+        Apply = { Invoke-Bcdedit /set disabledynamictick yes | Out-Null }
+    }
+    'platform-tick' = @{
+        Kind = 'bcd'
+        IsApplied = { Test-BcdOn $platTick }
+        UndoEntry = { @{ Kind='bcd'; Name='useplatformtick'; Previous=(ConvertTo-BcdBool $platTick) } }
+        Apply = { Invoke-Bcdedit /set useplatformtick yes | Out-Null }
+    }
+    'remove-platform-clock' = @{
+        Kind = 'bcd'
+        # This tweak removes a value, so "applied" means the value is already gone.
+        IsApplied = { $null -eq $platClock }
+        UndoEntry = { @{ Kind='bcd'; Name='useplatformclock'; Previous=(ConvertTo-BcdBool $platClock) } }
+        Apply = { Invoke-Bcdedit /deletevalue useplatformclock | Out-Null }
+    }
+}
+
+# Both the grid path and -Reset write the same pre-change snapshot: a full BCD
+# export whenever a bcd value is touched, plus the per-tweak undo JSON.
+function Save-UndoSnapshot([object[]]$Entries) {
+    # The suffix loop keeps two runs within the same second from clobbering the
+    # previous run's undo/backup files; the json and BCD backup share one stamp.
+    $base = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $stamp = $base
+    $n = 1
+    while ((Test-Path (Join-Path $PSScriptRoot "timer_undo_$stamp.json")) -or
+           (Test-Path (Join-Path $PSScriptRoot "bcd_backup_$stamp"))) {
+        $stamp = '{0}_{1}' -f $base, $n++
+    }
+    if ($Entries | Where-Object { $_.Kind -eq 'bcd' }) {
+        # Full BCD store export: last-resort rollback (bcdedit /import <file>) even
+        # if the undo JSON is lost.
+        $bcdBackup = Join-Path $PSScriptRoot "bcd_backup_$stamp"
+        Invoke-Bcdedit /export $bcdBackup | Out-Null
+        Write-Host "BCD store backed up: $bcdBackup" -ForegroundColor Cyan
+    }
+    $undoFile = Join-Path $PSScriptRoot "timer_undo_$stamp.json"
+    ConvertTo-Json $Entries -Depth 4 | Set-Content -Path $undoFile -Encoding UTF8
+    Write-Host "Undo file saved: $undoFile (revert with -Undo)" -ForegroundColor Cyan
+}
+
+# ---- Reset mode: straight back to the Windows defaults ----
+# Undo files are per-run snapshots, so the chain breaks easily: delete one, or
+# take the first one over an already tweaked system, and no amount of -Undo
+# reaches the original state. This ignores the snapshots entirely and clears
+# every value the script can set, by handing the revert engine records that
+# describe the default.
+if ($Reset) {
+    $before = @(foreach ($id in ($tweakDefs.Keys | Sort-Object)) { & $tweakDefs[$id].UndoEntry })
+    # A record with no Previous (and no Xml, for the task) already is the default.
+    $set = @($before | Where-Object { $null -ne $_.Previous -or $null -ne $_.Xml })
+    if (-not $set) {
+        Write-Host "Nothing to reset - every value this script can set is already at its Windows default." -ForegroundColor Yellow
+        Wait-IfElevatedWindow; return
+    }
+    Write-Host "-Reset clears these back to the Windows default:" -ForegroundColor Cyan
+    foreach ($e in $set) {
+        $what = if ($e.Kind -eq 'reg') { $e.Value } else { $e.Name }
+        $now = if ($e.Kind -eq 'task') { 'installed' } else { "now '$($e.Previous)'" }
+        Write-Host ("  [{0,-4}] {1} ({2})" -f $e.Kind, $what, $now)
+    }
+    Write-Host "That is the Windows default, not whatever you had before you first ran this script - only an undo file holds that. The state above is snapshotted first, so -Undo brings it back." -ForegroundColor DarkGray
+    if ((Read-Host "Continue? (y/N)") -notmatch '^y(es)?$') {
+        Write-Host "Cancelled. No changes made." -ForegroundColor Yellow
+        Wait-IfElevatedWindow; return
+    }
+    Save-UndoSnapshot $set
+    Write-Host ""
+    # The same records with the target emptied out - Invoke-UndoEntries reads a
+    # null Previous/Xml as "the value was absent", which is exactly the default.
+    $target = foreach ($e in $set) {
+        $d = $e.Clone()
+        $d.Previous = $null
+        $d.Xml = $null
+        $d
+    }
+    Invoke-UndoEntries $target
+    Write-Host ""
+    Write-Host "Done. Reboot for the bcdedit/registry reset to take effect." -ForegroundColor Green
     Wait-IfElevatedWindow; return
 }
 
@@ -438,95 +597,20 @@ if (-not $selected) {
     return
 }
 
-# One definition per tweak id: backup kind, undo record, and apply step live
-# together so a new tweak cannot desync them.
-$tweakDefs = @{
-    'global-reg' = @{
-        Kind = 'reg'
-        UndoEntry = { @{ Kind='reg'; Path=$KernelKey; Value=$GlobalValue; Previous=$globalReq } }
-        Apply = { New-ItemProperty -Path $KernelKey -Name $GlobalValue -Value 1 -PropertyType DWord -Force | Out-Null }
-    }
-    'holder-task' = @{
-        Kind = 'task'
-        # Xml of a pre-existing task lets -Undo restore it instead of losing it
-        # to Register-ScheduledTask -Force.
-        UndoEntry = { @{ Kind='task'; Name=$TaskName; Xml=$(if ($holderTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }) } }
-        Apply = {
-            $taskUser = if ($LogonUser) { $LogonUser } else { "$env:USERDOMAIN\$env:USERNAME" }
-            # Run under conhost --headless, not powershell -WindowStyle Hidden:
-            # that switch only hides powershell's OWN console window, and when the
-            # user has a delegated default terminal (Windows Terminal) the window
-            # belongs to another process - the holder then sits in a visible, empty
-            # tab for the whole session. --headless creates a console with no window
-            # at all, whatever the default terminal is.
-            # It is ConPTY though (Win10 1809 / build 17763 and up); older builds
-            # predate both ConPTY and terminal delegation, so there Hidden does hide
-            # the window and is the only option that starts at all.
-            $action = if ([Environment]::OSVersion.Version.Build -ge 17763) {
-                New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" `
-                    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Hold"
-            } else {
-                New-ScheduledTaskAction -Execute 'powershell.exe' `
-                    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Hold"
-            }
-            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
-            $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive
-            # No time limit: the holder must live for the whole session, or the
-            # resolution request dies with it.
-            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
-                -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-            # Reinstalling over a running holder: the old process would outlive the
-            # new definition, and MultipleInstancesPolicy (IgnoreNew by default)
-            # would make the Start below a no-op until the next logon.
-            Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-            Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-                -Principal $principal -Settings $settings -Force | Out-Null
-            Start-ScheduledTask -TaskName $TaskName
-        }
-    }
-    'dynamic-tick' = @{
-        Kind = 'bcd'
-        UndoEntry = { @{ Kind='bcd'; Name='disabledynamictick'; Previous=(ConvertTo-BcdBool $dynTick) } }
-        Apply = { Invoke-Bcdedit /set disabledynamictick yes | Out-Null }
-    }
-    'platform-tick' = @{
-        Kind = 'bcd'
-        UndoEntry = { @{ Kind='bcd'; Name='useplatformtick'; Previous=(ConvertTo-BcdBool $platTick) } }
-        Apply = { Invoke-Bcdedit /set useplatformtick yes | Out-Null }
-    }
-    'remove-platform-clock' = @{
-        Kind = 'bcd'
-        UndoEntry = { @{ Kind='bcd'; Name='useplatformclock'; Previous=(ConvertTo-BcdBool $platClock) } }
-        Apply = { Invoke-Bcdedit /deletevalue useplatformclock | Out-Null }
-    }
-}
-
 # ---- Backups BEFORE changing anything ----
 # The user may have sat in the grid for a while - re-read state so the undo
 # file records the actual pre-change values, not the ones from script start.
 Read-TimerTweakState
-# The suffix loop keeps two runs within the same second from clobbering the
-# previous run's undo/backup files; the json and BCD backup share one stamp.
-$base = Get-Date -Format 'yyyyMMdd_HHmmss'
-$stamp = $base
-$n = 1
-while ((Test-Path (Join-Path $PSScriptRoot "timer_undo_$stamp.json")) -or
-       (Test-Path (Join-Path $PSScriptRoot "bcd_backup_$stamp"))) {
-    $stamp = '{0}_{1}' -f $base, $n++
+# Re-applying a tweak that is already in place changes nothing, but it would
+# still write an undo file whose "previous" state is the tweaked one - and that
+# snapshot then burns a step of the -Undo chain without reverting anything.
+$selected = @($selected | Where-Object { -not (& $tweakDefs[$_.Id].IsApplied) })
+if (-not $selected) {
+    Write-Host "Everything selected is already in place - no changes made, no undo file written. Use -Reset to go back to the Windows defaults." -ForegroundColor Yellow
+    Wait-IfElevatedWindow
+    return
 }
-$undoState = New-Object System.Collections.Generic.List[object]
-if ($selected | Where-Object { $tweakDefs[$_.Id].Kind -eq 'bcd' }) {
-    # Full BCD store export: last-resort rollback (bcdedit /import <file>) even
-    # if the undo JSON is lost.
-    $bcdBackup = Join-Path $PSScriptRoot "bcd_backup_$stamp"
-    Invoke-Bcdedit /export $bcdBackup | Out-Null
-    Write-Host "BCD store backed up: $bcdBackup" -ForegroundColor Cyan
-}
-
-foreach ($t in $selected) { $undoState.Add((& $tweakDefs[$t.Id].UndoEntry)) }
-$undoFile = Join-Path $PSScriptRoot "timer_undo_$stamp.json"
-ConvertTo-Json $undoState -Depth 4 | Set-Content -Path $undoFile -Encoding UTF8
-Write-Host "Undo file saved: $undoFile (revert with -Undo)" -ForegroundColor Cyan
+Save-UndoSnapshot @(foreach ($t in $selected) { & $tweakDefs[$t.Id].UndoEntry })
 Write-Host ""
 
 # ---- Apply ----

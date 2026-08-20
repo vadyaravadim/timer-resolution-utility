@@ -40,7 +40,7 @@ Holder task        : not installed
 ```powershell
 Install-Script timer-resolution-utility
 timer-resolution-utility             # then run it by name (open a NEW PowerShell window first, so the Scripts folder is on PATH)
-timer-resolution-utility -Measure    # switches work directly: -Status, -Measure, -Undo
+timer-resolution-utility -Measure    # switches work directly: -Status, -Measure, -Undo, -Reset
 ```
 
 The script self-elevates. Update later with `Update-Script timer-resolution-utility`.
@@ -83,6 +83,7 @@ However you launch it:
 | `-Status` | Status only, change nothing |
 | `-Measure [-Samples N]` | Benchmark real `Sleep(1)` precision at current vs finest resolution (no admin needed) |
 | `-Undo` | Revert the changes recorded in the newest `timer_undo_*.json` |
+| `-Reset` | Clear every value the script can set back to the Windows default, no undo file needed |
 
 ## What It Does
 
@@ -155,7 +156,19 @@ If a tweak doesn't improve your `Sleep(1)` numbers (or your frame-time graph), u
 .\timer-resolution-utility.ps1 -Undo
 ```
 
-Reverts everything recorded in the newest `timer_undo_*.json`: bcdedit values are restored or removed, the registry value is restored or deleted, the holder task is unregistered (or restored to its previous definition if it existed before the tweak). Ran the utility several times? Undo files are per-run snapshots — revert newest-to-oldest; after each `-Undo` the script tells you how many older undo files remain.
+Reverts everything recorded in the newest `timer_undo_*.json`: bcdedit values are restored or removed, the registry value is restored or deleted, the holder task is stopped and unregistered (or restored to its previous definition if it existed before the tweak). Ran the utility several times? Undo files are per-run snapshots — revert newest-to-oldest; after each `-Undo` the script tells you how many older undo files remain.
+
+Applying a tweak that is already in place is skipped, so a repeat run cannot write a snapshot whose "previous" state is the tweaked one — that snapshot would consume an `-Undo` step without reverting anything.
+
+### Back to the defaults, no snapshots involved
+
+```powershell
+.\timer-resolution-utility.ps1 -Reset
+```
+
+The undo chain only reaches as far back as its oldest snapshot: delete one, or take the first one on a machine that was already tweaked, and no amount of `-Undo` gets you to a clean state. `-Reset` ignores the snapshots and clears every value the script can set — `disabledynamictick`, `useplatformtick`, `useplatformclock`, `GlobalTimerResolutionRequests`, the holder task. It lists what it will clear, asks for confirmation, and writes an undo file first, so `-Undo` brings the tweaked state back.
+
+That target is the **Windows default**, not whatever you had before you first ran the utility — only an undo file holds that.
 
 Last resort: every bcdedit change is preceded by a full BCD store export (`bcd_backup_*` next to the script). Restore it with:
 
@@ -207,7 +220,7 @@ Those two binaries (bundled in valleyofdoom's TimerResolution and various tweak 
 
 ### Is it safe?
 
-Every change is opt-in, previous values go to `timer_undo_*.json`, and bcdedit changes are additionally preceded by a full BCD store export. Worst case: `-Undo`, reboot. The one genuinely contested tweak (`useplatformtick`) is labeled as such in the grid.
+Every change is opt-in, previous values go to `timer_undo_*.json`, and bcdedit changes are additionally preceded by a full BCD store export. Worst case: `-Undo` (or `-Reset` if the undo chain is gone), reboot. The one genuinely contested tweak (`useplatformtick`) is labeled as such in the grid.
 
 ## Disclaimer
 
