@@ -1,6 +1,6 @@
 <#PSScriptInfo
 
-.VERSION 1.0.0
+.VERSION 0.0.0
 
 .GUID d6d491d2-400a-47a4-a2c6-e865a634b830
 
@@ -114,7 +114,7 @@ if (-not $PSCommandPath) {
     # holds the caller's command line, not the script body) - download the
     # script; the rerun below then binds the forwarded switches normally.
     try {
-        $body = Invoke-RestMethod 'https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1' -TimeoutSec 30
+        $body = Invoke-RestMethod 'https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/download/timer-resolution-utility.ps1' -TimeoutSec 30
     } catch {
         Write-Host "ERROR: could not download the script ($($_.Exception.Message)). Check your internet connection, or save the script to a file and run it from there." -ForegroundColor Red
         return
@@ -204,6 +204,20 @@ if ($Hold) {
         }
     }
 }
+
+# Read from this file's own PSScriptInfo block - the one place the version
+# lives (release.yml stamps the tag into it). 0.0.0 is the committed
+# placeholder: a clone or ZIP of main, not a release.
+$version = [regex]::Match((Get-Content $PSCommandPath -Raw), '(?m)^\.VERSION\s+(\S+)').Groups[1].Value
+$version = if ($version -eq '0.0.0') { 'dev build' } else { "v$version" }
+
+# Ahead of -Measure on purpose: that mode returns before the elevation below,
+# and its output is what ends up in a bug report. After -Hold: headless.
+Write-Host ""
+Write-Host "===================================" -ForegroundColor Cyan
+Write-Host "  TIMER RESOLUTION UTILITY $version" -ForegroundColor Cyan
+Write-Host "===================================" -ForegroundColor Cyan
+Write-Host ""
 
 # ---- Measure mode: no Administrator needed ----
 if ($Measure) {
@@ -319,7 +333,6 @@ function Format-BcdState($Value, [string]$OnText, [string]$OffText) {
     else { "set to '$Value'" }
 }
 
-Write-Host ""
 Write-Host "=== Windows timer status ===" -ForegroundColor Cyan
 Write-Host ("Timer resolution   : current {0:0.###} ms | finest {1:0.###} ms | OS default {2:0.###} ms" -f `
     $res.CurrentMs, $res.FinestMs, $res.DefaultMs)
@@ -547,7 +560,7 @@ if ($Reset) {
 
 # ---- Build the tweak grid: each row is one opt-in change ----
 if (-not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
-    Write-Host "Out-GridView is not available in this PowerShell. Run the script with Windows PowerShell (powershell.exe), or install the Microsoft.PowerShell.GraphicalTools module." -ForegroundColor Red
+    Write-Host "Out-GridView is not available in this PowerShell. Run the script with Windows PowerShell (powershell.exe) on a desktop edition of Windows." -ForegroundColor Red
     Wait-IfElevatedWindow
     return
 }
@@ -627,6 +640,8 @@ foreach ($t in $selected) {
 }
 
 Write-Host ""
-Write-Host "Done. Revert any time with: .\timer-resolution-utility.ps1 -Undo" -ForegroundColor Green
+# Full path and -ExecutionPolicy Bypass: this window usually sits in System32
+# (elevated relaunch), and a bare .\script.ps1 is blocked by the default policy.
+Write-Host "Done. Revert any time with: powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Undo" -ForegroundColor Green
 if ($needReboot) { Write-Host "REBOOT REQUIRED for bcdedit/registry changes to take effect." -ForegroundColor Green }
 Wait-IfElevatedWindow

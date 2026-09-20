@@ -50,7 +50,7 @@ The script self-elevates. Update later with `Update-Script timer-resolution-util
 **One-liner** instead (in any PowerShell — it self-elevates):
 
 ```powershell
-irm https://raw.githubusercontent.com/vadyaravadim/timer-resolution-utility/main/timer-resolution-utility.ps1 | iex
+irm https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/download/timer-resolution-utility.ps1 | iex
 ```
 
 The script downloads itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
@@ -86,6 +86,16 @@ However you launch it:
 | `-Measure [-Samples N]` | Benchmark real `Sleep(1)` precision at current vs finest resolution (no admin needed) |
 | `-Undo` | Revert the changes recorded in the newest `timer_undo_*.json` |
 | `-Reset` | Clear every value the script can set back to the Windows default, no undo file needed |
+
+How to pass a switch depends on how you got the script:
+
+| Installed via | Command |
+|---------------|---------|
+| PowerShell Gallery | `timer-resolution-utility -Status` |
+| ZIP or clone | `.\Run.bat -Status` from the script's folder |
+| One-liner | `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\timer-resolution-utility.ps1" -Status` |
+
+Calling `.\timer-resolution-utility.ps1` directly only works if your execution policy allows scripts — Windows blocks them by default, which is what `Run.bat` and `-ExecutionPolicy Bypass` get around.
 
 ## What It Does
 
@@ -147,25 +157,25 @@ HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\kernel
 Run the built-in benchmark before and after any tweak:
 
 ```powershell
-.\timer-resolution-utility.ps1 -Measure
+.\Run.bat -Measure
 ```
 
-If a tweak doesn't improve your `Sleep(1)` numbers (or your frame-time graph), undo it. That's the whole philosophy: **measure, don't cargo-cult**.
+([Other install methods](#switches) pass the switch differently.) If a tweak doesn't improve your `Sleep(1)` numbers (or your frame-time graph), undo it. That's the whole philosophy: **measure, don't cargo-cult**.
 
 ## Reverting
 
 ```powershell
-.\timer-resolution-utility.ps1 -Undo
+.\Run.bat -Undo
 ```
 
-Reverts everything recorded in the newest `timer_undo_*.json`: bcdedit values are restored or removed, the registry value is restored or deleted, the holder task is stopped and unregistered (or restored to its previous definition if it existed before the tweak). Ran the utility several times? Undo files are per-run snapshots — revert newest-to-oldest; after each `-Undo` the script tells you how many older undo files remain.
+([Other install methods](#switches) pass the switch differently.) Reverts everything recorded in the newest `timer_undo_*.json`: bcdedit values are restored or removed, the registry value is restored or deleted, the holder task is stopped and unregistered (or restored to its previous definition if it existed before the tweak). Ran the utility several times? Undo files are per-run snapshots — revert newest-to-oldest; after each `-Undo` the script tells you how many older undo files remain.
 
 Applying a tweak that is already in place is skipped, so a repeat run cannot write a snapshot whose "previous" state is the tweaked one — that snapshot would consume an `-Undo` step without reverting anything.
 
 ### Back to the defaults, no snapshots involved
 
 ```powershell
-.\timer-resolution-utility.ps1 -Reset
+.\Run.bat -Reset
 ```
 
 The undo chain only reaches as far back as its oldest snapshot: delete one, or take the first one on a machine that was already tweaked, and no amount of `-Undo` gets you to a clean state. `-Reset` ignores the snapshots and clears every value the script can set — `disabledynamictick`, `useplatformtick`, `useplatformclock`, `GlobalTimerResolutionRequests`, the holder task. It lists what it will clear, asks for confirmation, and writes an undo file first, so `-Undo` brings the tweaked state back.
@@ -183,7 +193,7 @@ bcdedit /import "C:\path\to\bcd_backup_20260717_120000"
 | | |
 |---|---|
 | **Windows** | 10, 11 |
-| **PowerShell** | Windows PowerShell 5.1 (ships with Windows 10/11). The tweak grid uses `Out-GridView` — PowerShell 7 needs the `Microsoft.PowerShell.GraphicalTools` module. `-Measure` works anywhere |
+| **PowerShell** | Windows PowerShell 5.1 (ships with Windows 10/11). PowerShell 7 works too. The tweak grid uses `Out-GridView`, which needs a desktop edition of Windows; `-Measure` works anywhere |
 | **Rights** | Administrator (self-elevates via UAC). `-Measure` runs without admin |
 
 ## FAQ

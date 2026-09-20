@@ -12,6 +12,36 @@ went backwards once, so release order and version order disagree in this reposit
 
 ## [Unreleased]
 
+### Added
+
+- The script prints a banner with its version (`TIMER RESOLUTION UTILITY v1.3.1`) in every mode, including
+  `-Measure` and `-Status`, so you can tell at a glance whether the copy you are running is the current
+  release - and a bug report that includes the output says which version it is about. A copy cloned or
+  zipped from `main` rather than taken from a release says `dev build`.
+
+### Changed
+
+- The `irm ... | iex` one-liner, and the copy it saves into your user profile, now download the latest
+  tagged release instead of whatever sits on `main`. Until now the one-liner ran - as Administrator - a
+  file that had not been through the release checks and had no checksum or provenance behind it. It is
+  now byte-for-byte the release asset, so `SHA256SUMS.txt` and `gh attestation verify` cover it too. The
+  old command keeps working; swap the URL for the one in the README when convenient.
+- A release is no longer published unless `lint` and `ascii-check` pass on the tagged commit.
+
+### Fixed
+
+- `Run.bat -Undo`, `Run.bat -Reset`, `Run.bat -Status` and `Run.bat -Measure` now do what they say.
+  `Run.bat` dropped everything typed after its name, so `Run.bat -Undo` quietly opened the tweak picker
+  instead of undoing anything.
+- The "Revert any time with" line at the end of a run now prints a command that works when pasted: the
+  full path to the script plus `-ExecutionPolicy Bypass`. The old `.\timer-resolution-utility.ps1 -Undo`
+  failed twice over - the elevated window sits in `System32`, not in the script's folder, and Windows
+  blocks direct `.ps1` runs by default. The README had the same command; it now lists the working one for
+  each install method.
+- The README and the "Out-GridView is not available" message no longer say PowerShell 7 needs the
+  `Microsoft.PowerShell.GraphicalTools` module. PowerShell 7 on a desktop edition of Windows has
+  `Out-GridView` built in, and the picker works there as is.
+
 ## [1.3.0] - 2026-08-20
 
 ### Added
