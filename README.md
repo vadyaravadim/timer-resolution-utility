@@ -15,7 +15,7 @@ Zero install. Zero dependencies. Zero binaries. Built-in undo.
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/timer-resolution-utility?logo=powershell&label=PS%20Gallery)](https://www.powershellgallery.com/packages/timer-resolution-utility)
 ![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)
 
-**Part of [RigPolice](https://rigpolice.com/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility) — see the effect on frame pacing with the free [Refresh Rate Test](https://rigpolice.com/monitor/tests/refresh-rate-test/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility)**
+**Part of the [RigPolice Latency Toolbox](https://rigpolice.com/system/latency-toolbox/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility) — see the effect on frame pacing with the free [Refresh Rate Test](https://rigpolice.com/monitor/tests/refresh-rate-test/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility)**
 
 </div>
 
