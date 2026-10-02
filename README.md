@@ -13,9 +13,11 @@ Zero install. Zero dependencies. Zero binaries. Built-in undo.
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?logo=powershell&logoColor=white)](https://docs.microsoft.com/en-us/powershell/)
 [![Latest release](https://img.shields.io/github/v/release/vadyaravadim/timer-resolution-utility)](https://github.com/vadyaravadim/timer-resolution-utility/releases)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/timer-resolution-utility?logo=powershell&label=PS%20Gallery)](https://www.powershellgallery.com/packages/timer-resolution-utility)
-![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)
+[![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)](https://github.com/vadyaravadim/timer-resolution-utility/stargazers)
 
 **Part of the [RigPolice Latency Toolbox](https://rigpolice.com/system/latency-toolbox/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility) — see the effect on frame pacing with the free [Refresh Rate Test](https://rigpolice.com/monitor/tests/refresh-rate-test/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility)**
+
+If it fixes your frame pacing, a ⭐ helps others find it.
 
 </div>
 
