@@ -644,4 +644,6 @@ Write-Host ""
 # (elevated relaunch), and a bare .\script.ps1 is blocked by the default policy.
 Write-Host "Done. Revert any time with: powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Undo" -ForegroundColor Green
 if ($needReboot) { Write-Host "REBOOT REQUIRED for bcdedit/registry changes to take effect." -ForegroundColor Green }
+Write-Host ""
+Write-Host "Useful? A star on GitHub helps others find it: https://github.com/vadyaravadim/timer-resolution-utility"
 Wait-IfElevatedWindow

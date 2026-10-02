@@ -12,6 +12,12 @@ went backwards once, so release order and version order disagree in this reposit
 
 ## [Unreleased]
 
+### Changed
+
+- A successful run now ends with one line linking to this repo and asking for a star, so people who got
+  the one-liner from an article or a chatbot know where the tool lives. It is printed only when a tweak
+  was applied: not on `-Status`, `-Undo`, `-Reset` or an empty selection.
+
 ## [1.3.1] - 2026-09-20
 
 ### Added
