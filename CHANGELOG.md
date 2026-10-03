@@ -12,6 +12,8 @@ went backwards once, so release order and version order disagree in this reposit
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-03
+
 ### Changed
 
 - A successful run now ends with one line linking to this repo and asking for a star, so people who got
@@ -251,7 +253,8 @@ Reliability release: every finding from a deep code review of the first release 
   immediately.
 - An open-source alternative to the closed-source TimerResolution.exe and ISLC.
 
-[Unreleased]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.2.3...v1.3.0
 [1.2.3]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.2.2...v1.2.3
