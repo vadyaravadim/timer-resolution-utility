@@ -241,21 +241,23 @@ if ($Measure) {
         $after.Avg, $after.StDev, $after.Min, $after.Max) -ForegroundColor Green
     [void][TimerNative]::NtSetTimerResolution([uint32]($res.FinestMs * 10000), $false, [ref]$cur)
 
+    $g = if ($IsWin11) { (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue }
     # The request changes nothing when someone already holds the finest
     # resolution - the holder task, a game, a browser. Both runs then measured
     # the same state, and without saying so the two lines read as a before/after
-    # whose measurement noise looks like a regression.
-    if ($heldMs -eq $res.CurrentMs) {
+    # whose measurement noise looks like a regression. That holds only while
+    # requests are system-wide: since Win10 2004 (build 19041) another process's
+    # request does not reach this one unless the Win11 global value is set, so
+    # the first run sat at the default and the difference is real.
+    $globalRequests = ([Environment]::OSVersion.Version.Build -lt 19041) -or ($g -eq 1)
+    if ($globalRequests -and $heldMs -eq $res.CurrentMs) {
         Write-Host ""
         Write-Host ("Both runs measured at {0:0.###} ms: the request changed nothing because something already holds that resolution (the holder task, a game, a browser). The difference between the two lines is measurement noise - stop that holder for a real before/after." -f $heldMs) -ForegroundColor DarkGray
     }
 
-    if ($IsWin11) {
-        $g = (Get-ItemProperty -Path $KernelKey -Name $GlobalValue -ErrorAction SilentlyContinue).$GlobalValue
-        if ($g -ne 1) {
-            Write-Host ""
-            Write-Host "Note: since Windows 10 2004 a resolution request only affects the requesting process. To make requests system-wide again, apply the GlobalTimerResolutionRequests tweak (run without -Measure)." -ForegroundColor DarkGray
-        }
+    if ($IsWin11 -and $g -ne 1) {
+        Write-Host ""
+        Write-Host "Note: since Windows 10 2004 a resolution request only affects the requesting process. To make requests system-wide again, apply the GlobalTimerResolutionRequests tweak (run without -Measure)." -ForegroundColor DarkGray
     }
     Wait-IfElevatedWindow
     return
@@ -367,7 +369,10 @@ function Invoke-UndoEntries([object[]]$Entries) {
         switch ($item.Kind) {
             'bcd' {
                 if ($null -ne $item.Previous) { Invoke-Bcdedit /set $item.Name $item.Previous | Out-Null }
-                else { Invoke-Bcdedit /deletevalue $item.Name | Out-Null }
+                # Skip a removal the state read at start shows is already done:
+                # bcdedit fails on a missing value, and the trap would strand this
+                # undo file - every later -Undo would hit it again.
+                elseif (-not $bcdOk -or $null -ne (Get-BcdValue $item.Name)) { Invoke-Bcdedit /deletevalue $item.Name | Out-Null }
                 Write-Host "  [bcd ] $($item.Name) -> $(if ($null -ne $item.Previous) { $item.Previous } else { 'removed (default)' })" -ForegroundColor Green
             }
             'reg' {
@@ -628,12 +633,14 @@ Write-Host ""
 
 # ---- Apply ----
 $needReboot = $false
+$applied = 0
 foreach ($t in $selected) {
     $def = $tweakDefs[$t.Id]
     try {
         & $def.Apply
         if ($def.Kind -ne 'task') { $needReboot = $true }
         Write-Host ("  [OK ] {0}" -f $t.Tweak) -ForegroundColor Green
+        $applied++
     } catch {
         Write-Host ("  [ERR] {0}: {1}" -f $t.Tweak, $_) -ForegroundColor Red
     }
@@ -644,6 +651,8 @@ Write-Host ""
 # (elevated relaunch), and a bare .\script.ps1 is blocked by the default policy.
 Write-Host "Done. Revert any time with: powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Undo" -ForegroundColor Green
 if ($needReboot) { Write-Host "REBOOT REQUIRED for bcdedit/registry changes to take effect." -ForegroundColor Green }
-Write-Host ""
-Write-Host "Useful? A star on GitHub helps others find it: https://github.com/vadyaravadim/timer-resolution-utility"
+if ($applied) {
+    Write-Host ""
+    Write-Host "Useful? A star on GitHub helps others find it: https://github.com/vadyaravadim/timer-resolution-utility"
+}
 Wait-IfElevatedWindow

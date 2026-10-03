@@ -109,10 +109,10 @@ Calling `.\timer-resolution-utility.ps1` directly only works if your execution p
 **Measured effect** (same Windows 11 machine as above, 20 samples):
 
 ```
-Sleep(1) at the CURRENT resolution:
+Sleep(1) at the CURRENT resolution (20 samples):
   avg 15.199 ms | stdev 0.398 | min 14.600 | max 15.912
 Sleep(1) after requesting the FINEST resolution for this process:
-  avg  1.404 ms | stdev 0.182 | min  1.010 | max  1.630
+  avg 1.404 ms | stdev 0.182 | min 1.010 | max 1.630
 ```
 
 ## The Problem: Why the Windows Timer Matters

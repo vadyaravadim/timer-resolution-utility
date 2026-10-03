@@ -47,7 +47,7 @@ Everything below exists because a broken chain silently strands the machine in a
 - **`Get-ForwardedSwitchList` is the ONE place mode switches are listed**, used by both the `irm | iex`
   bootstrap rerun and the UAC elevation. Splat it as `@(...)`: on PS 5.1 a single forwarded switch unrolls
   to a scalar string and breaks `powershell.exe -File` switch binding.
-- **A piped run downloads from the canonical raw URL and saves to the user profile with no BOM.** It cannot
+- **A piped run downloads the latest release asset and saves it to the user profile with no BOM.** It cannot
   persist `$MyInvocation.MyCommand.Definition` - under `irm | iex` that is the caller's command line, and
   the holder task ended up re-running the one-liner on every logon. The user profile rather than `%TEMP%`
   because the undo files live next to the script and the holder task points at it.

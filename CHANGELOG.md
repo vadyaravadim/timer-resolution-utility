@@ -18,6 +18,17 @@ went backwards once, so release order and version order disagree in this reposit
   the one-liner from an article or a chatbot know where the tool lives. It is printed only when a tweak
   was applied: not on `-Status`, `-Undo`, `-Reset` or an empty selection.
 
+### Fixed
+
+- `-Measure` could call a real improvement "measurement noise". When another program (or the holder task)
+  held 0.5 ms, it said the request "changed nothing" - but since Windows 10 2004 another program's request
+  does not speed up a process that did not ask, so the drop from ~15 ms to ~1.5 ms it had just measured
+  was genuine. The note now appears only when requests are system-wide: Windows 11 with the global
+  requests tweak applied, or Windows 10 before 2004.
+- `-Undo` got stuck when a boot option it had to remove was already gone - deleted by hand or by another
+  tool. `bcdedit` refused, the run stopped, and every later `-Undo` hit the same file, so older snapshots
+  were out of reach. A value that is already gone is now skipped.
+
 ## [1.3.1] - 2026-09-20
 
 ### Added
