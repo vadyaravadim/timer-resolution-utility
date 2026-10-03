@@ -20,6 +20,21 @@ went backwards once, so release order and version order disagree in this reposit
 
 ### Fixed
 
+- `-Undo` after a `-Reset` brought the holder task back but left it stopped, so the finest timer resolution
+  was not held again until your next logon. A holder that was running is now started again too. (Undo
+  files written before this version do not record that, and keep the old behavior.)
+- A `-Reset` or `-Undo` that only touched the holder task still said "Reboot for the bcdedit/registry
+  reset to take effect". The reboot note now appears only when a boot or registry value changed.
+- The README's first install method, the PowerShell Gallery, failed in the Windows PowerShell 5.1 that
+  comes with Windows: `Install-Script` stopped with "Administrator rights are required", and the installed
+  script was then blocked by the default execution policy. The one-liner, which works in any PowerShell,
+  is now listed first, and the Gallery route is marked as PowerShell 7.
+- After the `irm | iex` one-liner, the PowerShell window you ran it from was left treating every error as
+  fatal, so a later command or another script in that window could stop on an error it would normally
+  shrug off. The one-liner no longer changes that setting in your window.
+- Run from a folder with `[` or `]` in its path, the script stopped at once with "A parameter cannot be
+  found that matches parameter name 'Raw'" - even `-Measure`. It now runs, and writes and finds its undo
+  files, from any folder.
 - `-Measure` could call a real improvement "measurement noise". When another program (or the holder task)
   held 0.5 ms, it said the request "changed nothing" - but since Windows 10 2004 another program's request
   does not speed up a process that did not ask, so the drop from ~15 ms to ~1.5 ms it had just measured

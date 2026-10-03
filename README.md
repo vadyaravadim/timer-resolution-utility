@@ -39,7 +39,15 @@ Holder task        : not installed
 
 ## Quick Start
 
-**Easiest — from the PowerShell Gallery:**
+**Easiest — one line, in any PowerShell** (it self-elevates):
+
+```powershell
+irm https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/download/timer-resolution-utility.ps1 | iex
+```
+
+The script downloads itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
+
+**From the PowerShell Gallery**, in PowerShell 7 (`pwsh`):
 
 ```powershell
 Install-Script timer-resolution-utility
@@ -47,15 +55,7 @@ timer-resolution-utility             # then run it by name (open a NEW PowerShel
 timer-resolution-utility -Measure    # switches work directly: -Status, -Measure, -Undo, -Reset
 ```
 
-The script self-elevates. Update later with `Update-Script timer-resolution-utility`.
-
-**One-liner** instead (in any PowerShell — it self-elevates):
-
-```powershell
-irm https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/download/timer-resolution-utility.ps1 | iex
-```
-
-The script downloads itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
+The script self-elevates. Update later with `Update-Script timer-resolution-utility`. Not in the Windows PowerShell 5.1 that comes with Windows: there `Install-Script` wants an admin console and the default execution policy blocks the installed script — use the one-liner instead.
 
 **Or clone:**
 
@@ -93,7 +93,7 @@ How to pass a switch depends on how you got the script:
 
 | Installed via | Command |
 |---------------|---------|
-| PowerShell Gallery | `timer-resolution-utility -Status` |
+| PowerShell Gallery (PowerShell 7) | `timer-resolution-utility -Status` |
 | ZIP or clone | `.\Run.bat -Status` from the script's folder |
 | One-liner | `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\timer-resolution-utility.ps1" -Status` |
 

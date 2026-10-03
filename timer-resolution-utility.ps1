@@ -72,7 +72,6 @@ param(
     [string]$LogonUser  # internal: the pre-elevation user, for the holder task binding
 )
 
-$ErrorActionPreference = 'Stop'
 $TaskName = 'timer-resolution-utility-holder'
 $KernelKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel'
 $GlobalValue = 'GlobalTimerResolutionRequests'
@@ -114,14 +113,14 @@ if (-not $PSCommandPath) {
     # holds the caller's command line, not the script body) - download the
     # script; the rerun below then binds the forwarded switches normally.
     try {
-        $body = Invoke-RestMethod 'https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/download/timer-resolution-utility.ps1' -TimeoutSec 30
+        $body = Invoke-RestMethod 'https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/download/timer-resolution-utility.ps1' -TimeoutSec 30 -ErrorAction Stop
     } catch {
         Write-Host "ERROR: could not download the script ($($_.Exception.Message)). Check your internet connection, or save the script to a file and run it from there." -ForegroundColor Red
         return
     }
     $saved = Join-Path $env:USERPROFILE 'timer-resolution-utility.ps1'
     if ((Test-Path $saved) -and ([IO.File]::ReadAllText($saved) -cne $body)) {
-        Copy-Item $saved "$saved.bak" -Force
+        Copy-Item $saved "$saved.bak" -Force -ErrorAction Stop
         Write-Host "Existing $saved differs - previous copy kept as $saved.bak" -ForegroundColor Yellow
     }
     # UTF8Encoding($false) = no BOM: a BOM would break a later `irm | iex` of
@@ -135,6 +134,10 @@ if (-not $PSCommandPath) {
     # The rerun's exit code stays in $LASTEXITCODE for scripted callers.
     return
 }
+
+# Only now: under `irm | iex` the block above runs in the caller's own session,
+# where Stop would stay behind in their console after the script is done.
+$ErrorActionPreference = 'Stop'
 
 Add-Type -TypeDefinition @"
 using System;
@@ -208,7 +211,7 @@ if ($Hold) {
 # Read from this file's own PSScriptInfo block - the one place the version
 # lives (release.yml stamps the tag into it). 0.0.0 is the committed
 # placeholder: a clone or ZIP of main, not a release.
-$version = [regex]::Match((Get-Content $PSCommandPath -Raw), '(?m)^\.VERSION\s+(\S+)').Groups[1].Value
+$version = [regex]::Match((Get-Content -LiteralPath $PSCommandPath -Raw), '(?m)^\.VERSION\s+(\S+)').Groups[1].Value
 $version = if ($version -eq '0.0.0') { 'dev build' } else { "v$version" }
 
 # Ahead of -Measure on purpose: that mode returns before the elevation below,
@@ -392,7 +395,10 @@ function Invoke-UndoEntries([object[]]$Entries) {
                 Stop-ScheduledTask -TaskName $item.Name -ErrorAction SilentlyContinue
                 if ($item.Xml) {
                     Register-ScheduledTask -TaskName $item.Name -Xml $item.Xml -Force | Out-Null
-                    Write-Host "  [task] $($item.Name) restored to previous definition" -ForegroundColor Green
+                    # Registering does not start it: a holder that was running would
+                    # otherwise stay off until the next logon.
+                    if ($item.Running) { Start-ScheduledTask -TaskName $item.Name }
+                    Write-Host "  [task] $($item.Name) restored to previous definition$(if ($item.Running) { ' and started' })" -ForegroundColor Green
                 } else {
                     Unregister-ScheduledTask -TaskName $item.Name -Confirm:$false -ErrorAction SilentlyContinue
                     Write-Host "  [task] $($item.Name) removed" -ForegroundColor Green
@@ -406,7 +412,7 @@ function Invoke-UndoEntries([object[]]$Entries) {
 if ($Undo) {
     # -Filter also matches renamed *.applied.json files, so exclude them, and
     # sort by the name stamp - LastWriteTime survives renames and can mislead.
-    $undoFile = Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
+    $undoFile = Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch '\.applied\.json$' } |
         Sort-Object Name | Select-Object -Last 1
     if (-not $undoFile) {
@@ -416,14 +422,20 @@ if ($Undo) {
     Write-Host "Reverting: $($undoFile.Name)" -ForegroundColor Cyan
     # No @() around it: ConvertFrom-Json hands back the whole array as one object
     # on PS 5.1, so wrapping it would pass a single nested array instead of records.
-    Invoke-UndoEntries (Get-Content $undoFile.FullName -Raw | ConvertFrom-Json)
-    Rename-Item $undoFile.FullName ($undoFile.FullName -replace '\.json$', '.applied.json')
-    $remaining = @(Get-ChildItem -Path $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
+    $entries = Get-Content -LiteralPath $undoFile.FullName -Raw | ConvertFrom-Json
+    Invoke-UndoEntries $entries
+    Rename-Item -LiteralPath $undoFile.FullName ($undoFile.FullName -replace '\.json$', '.applied.json')
+    $remaining = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'timer_undo_*.json' -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch '\.applied\.json$' })
     if ($remaining.Count) {
         Write-Host "$($remaining.Count) older undo file(s) remain - run -Undo again to revert earlier runs." -ForegroundColor Yellow
     }
-    Write-Host "Done. Reboot for bcdedit/registry reverts to take effect." -ForegroundColor Green
+    # The task acts at once; only bcd and registry entries wait for a reboot.
+    if ($entries | Where-Object { $_.Kind -ne 'task' }) {
+        Write-Host "Done. Reboot for bcdedit/registry reverts to take effect." -ForegroundColor Green
+    } else {
+        Write-Host "Done." -ForegroundColor Green
+    }
     Wait-IfElevatedWindow; return
 }
 
@@ -443,7 +455,8 @@ $tweakDefs = @{
         IsApplied = { $false }
         # Xml of a pre-existing task lets -Undo restore it instead of losing it
         # to Register-ScheduledTask -Force.
-        UndoEntry = { @{ Kind='task'; Name=$TaskName; Xml=$(if ($holderTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }) } }
+        # Running: -Undo restarts a holder that was running, not just its definition.
+        UndoEntry = { @{ Kind='task'; Name=$TaskName; Xml=$(if ($holderTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }); Running=($holderTask.State -eq 'Running') } }
         Apply = {
             $taskUser = if ($LogonUser) { $LogonUser } else { "$env:USERDOMAIN\$env:USERNAME" }
             # Run under conhost --headless, not powershell -WindowStyle Hidden:
@@ -506,8 +519,8 @@ function Save-UndoSnapshot([object[]]$Entries) {
     $base = Get-Date -Format 'yyyyMMdd_HHmmss'
     $stamp = $base
     $n = 1
-    while ((Test-Path (Join-Path $PSScriptRoot "timer_undo_$stamp.json")) -or
-           (Test-Path (Join-Path $PSScriptRoot "bcd_backup_$stamp"))) {
+    while ((Test-Path -LiteralPath (Join-Path $PSScriptRoot "timer_undo_$stamp.json")) -or
+           (Test-Path -LiteralPath (Join-Path $PSScriptRoot "bcd_backup_$stamp"))) {
         $stamp = '{0}_{1}' -f $base, $n++
     }
     if ($Entries | Where-Object { $_.Kind -eq 'bcd' }) {
@@ -518,7 +531,7 @@ function Save-UndoSnapshot([object[]]$Entries) {
         Write-Host "BCD store backed up: $bcdBackup" -ForegroundColor Cyan
     }
     $undoFile = Join-Path $PSScriptRoot "timer_undo_$stamp.json"
-    ConvertTo-Json $Entries -Depth 4 | Set-Content -Path $undoFile -Encoding UTF8
+    ConvertTo-Json $Entries -Depth 4 | Set-Content -LiteralPath $undoFile -Encoding UTF8
     Write-Host "Undo file saved: $undoFile (revert with -Undo)" -ForegroundColor Cyan
 }
 
@@ -559,7 +572,11 @@ if ($Reset) {
     }
     Invoke-UndoEntries $target
     Write-Host ""
-    Write-Host "Done. Reboot for the bcdedit/registry reset to take effect." -ForegroundColor Green
+    if ($set | Where-Object { $_.Kind -ne 'task' }) {
+        Write-Host "Done. Reboot for the bcdedit/registry reset to take effect." -ForegroundColor Green
+    } else {
+        Write-Host "Done." -ForegroundColor Green
+    }
     Wait-IfElevatedWindow; return
 }
 

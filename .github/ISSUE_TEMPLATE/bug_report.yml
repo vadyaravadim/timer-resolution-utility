@@ -18,7 +18,7 @@ body:
       label: Output of -Status
       description: |
         Changes nothing. It asks for admin rights because it reads the boot configuration; copy the text from the elevated window. It shows the script version, the timer resolution, the `bcdedit` values, HPET, the Windows 11 global requests value and the holder task, which answers most follow-up questions up front. If `-Status` itself fails, paste the error.
-        - PowerShell Gallery: `timer-resolution-utility -Status`
+        - PowerShell Gallery (PowerShell 7): `timer-resolution-utility -Status`
         - One-liner: `powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\timer-resolution-utility.ps1" -Status`
         - ZIP / clone, from the script's folder: `powershell -ExecutionPolicy Bypass -File .\timer-resolution-utility.ps1 -Status`
       render: text
