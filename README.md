@@ -15,9 +15,9 @@ Zero install. Zero dependencies. Zero binaries. Built-in undo.
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/timer-resolution-utility?logo=powershell&label=PS%20Gallery)](https://www.powershellgallery.com/packages/timer-resolution-utility)
 [![GitHub Stars](https://img.shields.io/github/stars/vadyaravadim/timer-resolution-utility?style=social)](https://github.com/vadyaravadim/timer-resolution-utility/stargazers)
 
-**Part of the [RigPolice Latency Toolbox](https://rigpolice.com/system/latency-toolbox/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility) — see the effect on frame pacing with the free [Refresh Rate Test](https://rigpolice.com/monitor/tests/refresh-rate-test/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility)**
+**Part of the [RigPolice Latency Toolbox](https://rigpolice.com/system/latency-toolbox/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility) — check your frame pacing before and after with the free [Refresh Rate Test](https://rigpolice.com/monitor/tests/refresh-rate-test/?utm_source=github&utm_medium=readme&utm_campaign=timer-resolution-utility)**
 
-If it fixes your frame pacing, a ⭐ helps others find it.
+If it works for you, a ⭐ helps others find it.
 
 </div>
 
@@ -117,13 +117,9 @@ Sleep(1) after requesting the FINEST resolution for this process:
 
 ## The Problem: Why the Windows Timer Matters
 
-By default Windows wakes the scheduler every **15.625 ms** (64 Hz). Anything that waits — frame limiters, `Sleep()`-based game loops, audio buffers, input polling — can only be as precise as that tick. Raising timer resolution to **0.5–1 ms** makes those waits precise; the timer tweaks (`disabledynamictick`, `useplatformtick`) change *how* the tick is generated.
+By default Windows wakes the scheduler every **15.625 ms** (64 Hz). Anything that sleeps or waits with a time-out — `Sleep()`-based game loops and the frame limiters built on them — can only be as precise as that tick. Raising timer resolution to **0.5–1 ms** makes those waits precise; the timer tweaks (`disabledynamictick`, `useplatformtick`) change *how* the tick is generated.
 
-**Symptoms this addresses:**
-
-- Frame limiters overshooting (capped 240 fps that actually delivers uneven 220–260)
-- Micro-stutters and frame-time spikes despite high FPS
-- Sleep-based game logic (common in older engines) running visibly unevenly
+Guides also blame the default tick for frame limiters that miss their cap, micro-stutter and uneven `Sleep()`-based game logic. We have measured the wait itself (`Sleep(1)` above: 15.2 ms at the default resolution, 1.4 ms at the finest), not a frame-time gain in a game, so check your own frame-time graph before and after.
 
 ## Timer Resolution on Windows 11 (Why Old Tools Stopped Working)
 
@@ -202,11 +198,11 @@ bcdedit /import "C:\path\to\bcd_backup_20260717_120000"
 
 ### What is timer resolution in Windows?
 
-The granularity of the system interrupt timer — how often Windows can wake a waiting thread. Default is 15.625 ms (64 Hz); applications can request down to 0.5 ms. Every `Sleep()`, timer callback, and frame limiter is quantized to it.
+The granularity of the system interrupt timer — how often Windows can wake a waiting thread. Default is 15.625 ms (64 Hz); applications can request down to 0.5 ms. `Sleep()`, the time-outs of other wait functions and periodic timer callbacks are quantized to it, and so is any frame limiter built on them.
 
 ### Does 0.5 ms timer resolution reduce input lag or increase FPS?
 
-It doesn't raise average FPS. It makes **waiting precise**: frame limiters hit their cap exactly, sleep-based game loops stop jittering, frame pacing evens out. If a game busy-waits instead of sleeping (many modern engines do), you won't see a difference — which is exactly what `-Measure` and your frame-time graph will tell you.
+We have not measured either. What we measured is the wait itself: `Sleep(1)` took 15.2 ms on average at the default resolution and 1.4 ms at the finest one (see [What It Does](#what-it-does)). A game that sleeps on the timer can only wait as precisely as the resolution allows; a game that busy-waits instead gains nothing. Your frame-time graph before and after is the test that counts.
 
 ### Why doesn't TimerResolution.exe work on Windows 11?
 
@@ -214,7 +210,7 @@ Two changes: since Windows 10 2004 a resolution request affects **only the reque
 
 ### Should I disable dynamic tick (`disabledynamictick yes`)?
 
-It's the most commonly beneficial bcdedit timer tweak: it stops the kernel from suspending the periodic tick on idle, which some systems handle poorly (DPC latency spikes). It costs battery life on laptops. Apply it alone, measure, keep it only if your numbers improve.
+Guides recommend it against DPC latency spikes: it stops the kernel from suspending the periodic tick on idle. We have not measured its effect. It costs battery life on laptops. Apply it alone, measure, keep it only if your numbers improve.
 
 ### Should I use `useplatformtick yes`?
 
@@ -222,7 +218,7 @@ Contested. It forces a fixed platform tick instead of the TSC-driven one; some s
 
 ### Should HPET be on or off for gaming?
 
-The old advice to **force** HPET (`bcdedit /set useplatformclock true`) is outdated and usually *increases* latency on modern systems — Windows picks the best clock source (TSC) on its own. If an old guide made you force it, the grid offers to remove it. Disabling the HPET *device* in Device Manager is a separate debate; this utility shows its state and touches nothing uninvited.
+The old advice to **force** HPET (`bcdedit /set useplatformclock true`) is outdated: on modern systems Windows picks the best clock source (TSC) on its own. If an old guide made you force it, the grid offers to remove it. Disabling the HPET *device* in Device Manager is a separate debate; this utility shows its state and touches nothing uninvited.
 
 ### How is this different from TimerResolution.exe / ISLC?
 
@@ -242,10 +238,10 @@ bcdedit edits modify the boot configuration. The utility backs up the BCD store 
 
 ## Related
 
-- [MSI Mode Utility](https://github.com/vadyaravadim/msi-mode-utility) — enable MSI mode (Message Signaled Interrupts) for GPU, USB, network & audio devices to cut DPC latency and input lag
-- [Interrupt Affinity Utility](https://github.com/vadyaravadim/interrupt-affinity-utility) — pin GPU, network, USB & audio interrupts to specific CPU cores (P/E-core aware) to tame DPC latency
-- [CPU Parking Disabler](https://github.com/vadyaravadim/cpu-parking-disabler) — disable CPU core parking on Windows 10/11 to fix micro-stutters and input lag
-- [GameDVR & FSO Disabler](https://github.com/vadyaravadim/gamedvr-fso-disabler) — disable Game DVR / Xbox Game Bar capture and Fullscreen Optimizations on Windows 10/11 to fix capture stutters and frame drops
+- [MSI Mode Utility](https://github.com/vadyaravadim/msi-mode-utility) — enable MSI mode (Message Signaled Interrupts) for GPU, USB, network & audio devices
+- [Interrupt Affinity Utility](https://github.com/vadyaravadim/interrupt-affinity-utility) — pin GPU, network, USB & audio interrupts to specific CPU cores (P/E-core aware)
+- [CPU Parking Disabler](https://github.com/vadyaravadim/cpu-parking-disabler) — disable CPU core parking on Windows 10/11, with the parked-core count shown before and after
+- [GameDVR & FSO Disabler](https://github.com/vadyaravadim/gamedvr-fso-disabler) — disable Game DVR / Xbox Game Bar capture and Fullscreen Optimizations on Windows 10/11
 - [Remove Hidden Devices](https://github.com/vadyaravadim/remove-hidden-devices) — remove ghost / hidden devices left behind by unplugged USB sticks, headsets & dongles cluttering Device Manager
 
 Same idea across the series: one transparent PowerShell script, no binaries, you see exactly what changes.
@@ -258,7 +254,7 @@ Same idea across the series: one transparent PowerShell script, no binaries, you
 
 <div align="center">
 
-If this fixed your frame pacing, consider giving it a ⭐
+If this helped, consider giving it a ⭐
 
 [Report Issues](https://github.com/vadyaravadim/timer-resolution-utility/issues)
 
