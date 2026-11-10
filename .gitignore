@@ -3,3 +3,4 @@ bcd_backup_*
 .vs/
 .vscode/
 .claude/
+.DS_Store
