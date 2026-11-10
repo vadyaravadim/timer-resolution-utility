@@ -58,9 +58,29 @@ Compare the hash against the one in the corresponding
 [release](https://github.com/vadyaravadim/timer-resolution-utility/releases).
 
 The hash only proves the file matches the release page. The provenance proves the
-file was built by this repository's `release.yml` from the tagged commit - check it
+file was built from the tagged commit of this repository by the release workflow
+shared by the six RigPolice Latency Toolbox scripts,
+[`vadyaravadim/latency-toolbox-ci`](https://github.com/vadyaravadim/latency-toolbox-ci) - check it
 with the [GitHub CLI](https://cli.github.com/):
 
 ```powershell
+gh attestation verify .\timer-resolution-utility.ps1 -R vadyaravadim/timer-resolution-utility --signer-workflow vadyaravadim/latency-toolbox-ci/.github/workflows/pipeline.yml
+```
+
+Without `--signer-workflow` the command rejects these releases: by default it only
+accepts a signature from this repository's own workflows.
+
+Releases v1.0.1 and v1.2.1 to v1.3.2 were built by this repository's own `release.yml`
+(v1.0.0 and v1.1.0 to v1.2.0 carry no provenance). Verify those with:
+
+```powershell
 gh attestation verify .\timer-resolution-utility.ps1 -R vadyaravadim/timer-resolution-utility
+```
+
+Releases from v1.3.1 on are immutable: when one is published, GitHub itself attests
+its tag, its commit and every file attached to it. That check does not depend on
+which workflow built the file:
+
+```powershell
+gh release verify-asset vX.Y.Z .\timer-resolution-utility.ps1 -R vadyaravadim/timer-resolution-utility
 ```
