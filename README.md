@@ -47,6 +47,8 @@ irm https://github.com/vadyaravadim/timer-resolution-utility/releases/latest/dow
 
 The script downloads itself to `%USERPROFILE%\timer-resolution-utility.ps1` (not a temp folder) on purpose: the `timer_undo_*.json` and BCD backup files are written next to it, and the resolution-holder scheduled task points at it.
 
+**Check it before it runs:** download `timer-resolution-utility.ps1` from the [latest release](https://github.com/vadyaravadim/timer-resolution-utility/releases/latest), verify it as [SECURITY.md](SECURITY.md#verifying-a-release) shows, then run that file with `powershell -ExecutionPolicy Bypass -File .\timer-resolution-utility.ps1`.
+
 **From the PowerShell Gallery**, in PowerShell 7 (`pwsh`):
 
 ```powershell
@@ -231,6 +233,10 @@ Those two binaries (bundled in valleyofdoom's TimerResolution and various tweak 
 ### Is it safe?
 
 Every change is opt-in, previous values go to `timer_undo_*.json`, and bcdedit changes are additionally preceded by a full BCD store export. Worst case: `-Undo` (or `-Reset` if the undo chain is gone), reboot. The one genuinely contested tweak (`useplatformtick`) is labeled as such in the grid.
+
+### How do I remove the script itself?
+
+Run `-Undo` until no undo file is left, or `-Reset`, first: the holder task (`timer-resolution-utility-holder`) runs the saved script at every logon, and once the script is gone that task fails at every logon. Then delete what the script left: with the one-liner, `timer-resolution-utility.ps1`, a `timer-resolution-utility.ps1.bak` if there is one, the `timer_undo_*.json` files (`.applied.json` once undone) and the `bcd_backup_*` files in `%USERPROFILE%`; with the ZIP or a clone, the folder. From the PowerShell Gallery, those files sit in the folder `(Get-InstalledScript timer-resolution-utility).InstalledLocation` prints; delete them, then run `Uninstall-Script timer-resolution-utility`.
 
 ## Disclaimer
 

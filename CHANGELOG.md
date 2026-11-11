@@ -13,6 +13,14 @@ went backwards once, so release order and version order disagree in this reposit
 
 ## [Unreleased]
 
+### Added
+
+- The README's Quick Start says how to check a downloaded script before running it, and SECURITY.md now
+  starts with `gh release verify-asset`, which works for every immutable release whichever workflow built it.
+- The README FAQ says how to remove the script and the files it leaves behind - and that `-Undo` or `-Reset`
+  has to run first, because the holder task runs the saved script at every logon.
+- `Get-Help .\timer-resolution-utility.ps1 -Examples` shows how to run the script and each of its switches.
+
 ### Changed
 
 - Releases are tagged only after every check has passed on the commit they are built from, and the
@@ -22,6 +30,8 @@ went backwards once, so release order and version order disagree in this reposit
 - Checking that a downloaded script was built from this repository takes a new `gh attestation verify` command
   from this release on: releases are now built by the release workflow all six RigPolice scripts share.
   SECURITY.md has both commands.
+- On the PowerShell Gallery the script page links this changelog as its release notes, shows the license's
+  copyright line, and lists the script for both Windows PowerShell and PowerShell 7.
 
 ### Fixed
 

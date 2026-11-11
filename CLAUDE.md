@@ -1,5 +1,7 @@
 # Timer Resolution Utility
 
+Maintainer notes for Claude Code and the maintainer. Contributors start with [CONTRIBUTING.md](https://github.com/vadyaravadim/.github/blob/main/CONTRIBUTING.md); `rigpolice`, named below, is the maintainer's private website repository.
+
 A single self-contained PowerShell script (`timer-resolution-utility.ps1`, ~630 lines - the largest in the
 family) that manages the Windows timer stack: timer resolution, the `bcdedit` timer tweaks, HPET, and the
 Windows 11 global resolution requests. It shows state, measures real `Sleep(1)` precision, and applies the

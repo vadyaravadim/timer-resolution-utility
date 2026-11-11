@@ -8,9 +8,9 @@
 
 .COMPANYNAME
 
-.COPYRIGHT
+.COPYRIGHT Copyright (c) 2026 vadyaravadim
 
-.TAGS Windows Windows10 Windows11 Gaming TimerResolution HPET DynamicTick Latency Performance Stutter Tweak
+.TAGS Windows Windows10 Windows11 Gaming TimerResolution HPET DynamicTick Latency Performance Stutter Tweak PSEdition_Desktop PSEdition_Core
 
 .LICENSEURI https://github.com/vadyaravadim/timer-resolution-utility/blob/main/LICENSE
 
@@ -24,7 +24,7 @@
 
 .EXTERNALSCRIPTDEPENDENCIES
 
-.RELEASENOTES
+.RELEASENOTES https://github.com/vadyaravadim/timer-resolution-utility/blob/main/CHANGELOG.md
 
 .PRIVATEDATA
 
@@ -59,6 +59,27 @@
     newest-to-oldest - only the oldest holds the original state. If that
     chain is broken (a snapshot deleted, or the first one taken over an
     already tweaked system), -Reset is the way back to the defaults.
+
+.EXAMPLE
+    .\timer-resolution-utility.ps1
+
+    Double-click Run.bat, or right-click this file > Run with PowerShell.
+    No parameters needed - it elevates itself.
+
+.EXAMPLE
+    .\timer-resolution-utility.ps1 -Status
+
+.EXAMPLE
+    .\timer-resolution-utility.ps1 -Measure -Samples 50
+
+.EXAMPLE
+    .\timer-resolution-utility.ps1 -Undo
+
+.EXAMPLE
+    .\timer-resolution-utility.ps1 -Reset
+
+.LINK
+    https://github.com/vadyaravadim/timer-resolution-utility
 #>
 [CmdletBinding()]
 param(
