@@ -15,6 +15,8 @@ went backwards once, so release order and version order disagree in this reposit
 
 ### Added
 
+- Each release also carries `timer-resolution-utility.ps1.sigstore.json`, the script's signed build
+  provenance, as a file next to it.
 - The README's Quick Start says how to check a downloaded script before running it, and SECURITY.md now
   starts with `gh release verify-asset`, which works for every immutable release whichever workflow built it.
 - The README FAQ says how to remove the script and the files it leaves behind - and that `-Undo` or `-Reset`
