@@ -581,7 +581,10 @@ if ($Reset) {
 }
 
 # ---- Build the tweak grid: each row is one opt-in change ----
-if (-not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
+$serverLevelsKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Server\ServerLevels'
+$serverLevels = Get-ItemProperty -LiteralPath $serverLevelsKey -ErrorAction SilentlyContinue
+$serverCore = $serverLevels -and $serverLevels.'Server-Gui-Shell' -ne 1
+if ($serverCore -or -not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
     Write-Host "Out-GridView is not available in this PowerShell. Run the script with Windows PowerShell (powershell.exe) on a desktop edition of Windows." -ForegroundColor Red
     Wait-IfElevatedWindow
     return

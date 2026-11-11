@@ -23,6 +23,11 @@ went backwards once, so release order and version order disagree in this reposit
   from this release on: releases are now built by the release workflow all six RigPolice scripts share.
   SECURITY.md has both commands.
 
+### Fixed
+
+- On Windows Server Core the run stopped with a raw error when it opened the tweak grid instead of saying the
+  edition is not supported. It now says so before the grid. Nothing was ever changed.
+
 ## [1.3.2] - 2026-10-03
 
 ### Changed
