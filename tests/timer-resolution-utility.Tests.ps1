@@ -231,7 +231,7 @@ Describe 'the grid check on Windows Server Core' {
         Mock Start-Sleep { }
         Mock Write-Host { }
         & $copy
-        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -like 'Out-GridView is not available*' }
+        Should -Invoke Write-Host -Times 1 -Exactly -ParameterFilter { "$Object" -like 'Out-GridView is not available*(not Server Core)*' } -Because 'the README and CHANGELOG say the run names the unsupported edition'
         Should -Invoke Out-GridView -Times 0 -Exactly -Because 'Server Core cannot open the grid window'
     }
 }
