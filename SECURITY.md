@@ -48,20 +48,20 @@ Out of scope:
 ## Verifying a Release
 
 Each release publishes `SHA256SUMS.txt` and Sigstore build provenance. Verify a
-download before running it.
+download before running it. The `gh` checks below need the
+[GitHub CLI](https://cli.github.com/), signed in to a GitHub account (`gh auth login`).
 
 Releases from v1.3.1 on are immutable: when one is published, GitHub itself attests
 its tag, its commit and every file attached to it. This check works for every one of
 them, whichever workflow built the file. Without a tag it checks against the latest
-release; to check an older one, put its tag (`vX.Y.Z`) before the file name. It needs
-the [GitHub CLI](https://cli.github.com/):
+release; to check an older one, put its tag (`vX.Y.Z`) before the file name:
 
 ```powershell
 gh release verify-asset .\timer-resolution-utility.ps1 -R vadyaravadim/timer-resolution-utility
 ```
 
-Without the GitHub CLI, compare the file's hash against the one in the corresponding
-[release](https://github.com/vadyaravadim/timer-resolution-utility/releases):
+Without the GitHub CLI or a GitHub account, compare the file's hash against the one in
+the corresponding [release](https://github.com/vadyaravadim/timer-resolution-utility/releases):
 
 ```powershell
 Get-FileHash .\timer-resolution-utility.ps1 -Algorithm SHA256
