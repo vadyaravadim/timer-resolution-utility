@@ -191,7 +191,7 @@ bcdedit /import "C:\path\to\bcd_backup_20260717_120000"
 | | |
 |---|---|
 | **Windows** | 10, 11 |
-| **PowerShell** | Windows PowerShell 5.1 (ships with Windows 10/11). PowerShell 7 works too. The tweak grid uses `Out-GridView`, which needs a desktop edition of Windows; `-Measure` works anywhere |
+| **PowerShell** | Windows PowerShell 5.1 (ships with Windows 10/11). PowerShell 7 works too. The tweak grid uses `Out-GridView`, which needs a desktop edition of Windows: on Windows Server Core the script says so and stops before the grid, changing nothing; `-Status` and `-Measure` work anywhere |
 | **Rights** | Administrator (self-elevates via UAC). `-Measure` runs without admin |
 
 ## FAQ

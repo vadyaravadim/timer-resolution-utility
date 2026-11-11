@@ -88,9 +88,12 @@ pushed to `main`. The preview leg is not required: it only warns.
   would catch it. `PSUseCompatibleCommands` stays off: it flagged every Pester 5 parameter against the
   Pester 3.4 built into 5.1.
 - **The Pester gate runs every tracked `*.Tests.ps1` under Windows PowerShell 5.1 and the runner's `pwsh`,
-  and both legs block the release.** This repo has no test file yet, so the gate passes with a notice. A test
-  added later runs there too, so test code has to stay 5.1-safe: `Run.bat` and the elevated relaunch always
-  run 5.1.
+  and both legs block the release.** `tests/timer-resolution-utility.Tests.ps1` loads single functions from
+  the script's syntax tree and runs the `irm | iex` rerun against a stub script. Its whole-script test runs a
+  copy in `TestDrive` with every device, task, registry and grid command mocked and `bcdedit` stubbed on
+  `PATH`, only when elevated, after proving the mocks reach a script started with `&`; keep new tests that
+  way, contributors run them on their own PCs. Test code stays 5.1-safe: `Run.bat` and the elevated relaunch
+  always run 5.1.
 
 ## Release - the newest CHANGELOG section is the version
 
