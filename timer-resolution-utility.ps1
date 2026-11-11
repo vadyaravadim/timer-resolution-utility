@@ -606,7 +606,7 @@ $serverLevelsKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Server\Se
 $serverLevels = Get-ItemProperty -LiteralPath $serverLevelsKey -ErrorAction SilentlyContinue
 $serverCore = $serverLevels -and $serverLevels.'Server-Gui-Shell' -ne 1
 if ($serverCore -or -not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
-    Write-Host "Out-GridView is not available in this PowerShell. Run the script with Windows PowerShell (powershell.exe) on a desktop edition of Windows." -ForegroundColor Red
+    Write-Host "Out-GridView is not available in this PowerShell. It needs a Windows edition with a desktop (not Server Core); on a desktop edition, run the script with Windows PowerShell (powershell.exe)." -ForegroundColor Red
     Wait-IfElevatedWindow
     return
 }
