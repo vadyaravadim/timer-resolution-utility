@@ -35,7 +35,7 @@ Global timer res   : not set - resolution requests are per-process (Win10 2004+ 
 Holder task        : not installed
 ```
 
-> Real output from a Windows 11 machine. Note the catch: the *system* reports 1 ms (some app requested it), but this process still sleeps **15 ms** — that's the Windows 11 per-process timer behavior this utility explains and fixes. See [Windows 11 changed everything](#timer-resolution-on-windows-11-why-old-tools-stopped-working).
+> Real output from a Windows 11 machine. Note the catch: the *system* reports 1 ms (some app requested it), but this process still sleeps **15 ms** — that's the per-process timer behavior Windows has had since Windows 10 2004, which this utility explains and fixes. See [Windows 11 changed everything](#timer-resolution-on-windows-11-why-old-tools-stopped-working).
 
 ## Quick Start
 
@@ -125,11 +125,11 @@ Guides also blame the default tick for frame limiters that miss their cap, micro
 
 ## Timer Resolution on Windows 11 (Why Old Tools Stopped Working)
 
-Since **Windows 10 2004**, a raised timer resolution applies **only to the process that requested it** — and Windows 11 also ignores requests from minimized/background windows. That's why running `TimerResolution.exe` in the background no longer does what it did in 2018.
+Since **Windows 10 2004**, a raised timer resolution no longer applies to the whole system: a program that requests a resolution gets the finest one any program has requested, while a program that requests none stays at the default 15.625 ms ([Microsoft's timeBeginPeriod page](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod)). Windows 11 may also ignore the request of a program whose window is minimized, fully covered or otherwise hidden. That's why running `TimerResolution.exe` in the background no longer does what it did in 2018: it still helps programs that request a resolution themselves, but not the rest.
 
 Two things restore the old behavior, and this utility handles both:
 
-1. The documented **`GlobalTimerResolutionRequests = 1`** registry value (Windows 11 / Server 2022+) makes resolution requests system-wide again.
+1. The undocumented **`GlobalTimerResolutionRequests = 1`** registry value (Windows 11) makes resolution requests system-wide again. Microsoft does not document it: the community found it, [valleyofdoom's kernel research](https://github.com/valleyofdoom/PC-Tuning/blob/main/docs/research.md) confirms it, and Bruce Dawson, who [first wrote up the 2004 change](https://randomascii.wordpress.com/2020/10/04/windows-timer-resolution-the-great-rule-change/), advises against setting it outside of testing.
 2. A **holder** must keep the request alive — a resolution request dies with the process that made it. The utility installs a hidden scheduled task (pure PowerShell, no binary) that requests the finest resolution at logon and holds it.
 
 ## How It Works
@@ -208,7 +208,7 @@ We have not measured either. What we measured is the wait itself: `Sleep(1)` too
 
 ### Why doesn't TimerResolution.exe work on Windows 11?
 
-Two changes: since Windows 10 2004 a resolution request affects **only the requesting process**, and Windows 11 ignores requests from background windows. A background tool raising "the system timer" is mostly a no-op now. The fix is the `GlobalTimerResolutionRequests = 1` registry value plus a persistent holder — both are tweaks in this utility's grid.
+Two changes. Since Windows 10 2004, a resolution request no longer sets the timer for the whole system: [Microsoft documents](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod) that a program which requests a resolution gets the finest one any program has requested, and a program that requests none stays at the default 15.625 ms. Since Windows 11, Windows may also ignore the request of a program whose window is minimized, fully covered or otherwise hidden. So a background tool still speeds up programs that request a resolution themselves, but no longer reaches the ones that don't. The `GlobalTimerResolutionRequests = 1` registry value (Windows 11 only) plus a persistent holder brings back the old system-wide behavior; both are tweaks in this utility's grid.
 
 ### Should I disable dynamic tick (`disabledynamictick yes`)?
 
@@ -224,7 +224,7 @@ The old advice to **force** HPET (`bcdedit /set useplatformclock true`) is outda
 
 ### How is this different from TimerResolution.exe / ISLC?
 
-`TimerResolution.exe` (Lucas Hale) is a closed-source `.exe` from 2010-era forums that doesn't survive the Windows 11 per-process change on its own. ISLC holds resolution but is also closed-source and does memory-list cleaning you may not want. This is a readable script that does the same `NtSetTimerResolution` call, adds the Windows 11 registry piece, covers the bcdedit tweaks, measures the result, and writes an undo file first.
+`TimerResolution.exe` (Lucas Hale) is a closed-source `.exe` from 2010-era forums that doesn't survive the Windows 10 2004 per-process change on its own. ISLC holds resolution but is also closed-source and does memory-list cleaning you may not want. This is a readable script that does the same `NtSetTimerResolution` call, adds the Windows 11 registry piece, covers the bcdedit tweaks, measures the result, and writes an undo file first.
 
 ### How is this different from SetTimerResolution.exe / MeasureSleep.exe?
 
@@ -233,6 +233,10 @@ Those two binaries (bundled in valleyofdoom's TimerResolution and various tweak 
 ### Is it safe?
 
 Every change is opt-in, previous values go to `timer_undo_*.json`, and bcdedit changes are additionally preceded by a full BCD store export. Worst case: `-Undo` (or `-Reset` if the undo chain is gone), reboot. The one genuinely contested tweak (`useplatformtick`) is labeled as such in the grid.
+
+### Will the bcdedit tweaks trigger BitLocker recovery?
+
+Not with default settings. Microsoft lists `disabledynamictick`, `useplatformtick` and `useplatformclock` among the [BCD settings BitLocker ignores](https://learn.microsoft.com/windows/security/operating-system-security/data-protection/bitlocker/bcd-settings-and-bitlocker), so changing them doesn't bring up the recovery key prompt, with BitLocker or Device Encryption alike. If your IT department added them to a BitLocker BCD validation policy, run `Suspend-BitLocker -MountPoint C: -RebootCount 1` before applying.
 
 ### How do I remove the script itself?
 

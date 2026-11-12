@@ -40,7 +40,9 @@ Everything below exists because a broken chain silently strands the machine in a
 - **The holder watches its parent and exits with it**, ticking every 30s. The scheduler now launches the
   conhost wrapper, so killing the task kills only the wrapper; without the watch, the `-Hold` child
   survives as an unkillable-by-task orphan and every reinstall leaves another one behind.
-- **`-Hold` re-asserts the request hourly** - Windows 11 coalesces background resolution requests.
+- **`-Hold` re-asserts the request hourly** - Windows 11 may ignore the request of a hidden window-owning
+  process (documented on timeBeginPeriod); whether that reaches this headless holder, and whether the
+  re-request helps, is not measured. No source says Windows "coalesces" requests: do not write that again.
 - The task is bound to the pre-elevation user with an explicit Interactive principal, not the elevated
   admin account, or it never runs at that user's logon. A pre-existing holder task's XML is saved into the
   undo file and restored on `-Undo`.

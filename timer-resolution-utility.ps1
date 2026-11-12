@@ -218,8 +218,9 @@ if ($Hold) {
     # Stop and Undo and keep the resolution held until reboot, with no window and
     # no task left to stop it by.
     $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
-    # Re-assert every hour: Win11 can coalesce/ignore requests from background
-    # processes, and a periodic re-request costs nothing.
+    # Re-assert every hour: Win11 may ignore the request of a hidden
+    # window-owning process (documented); whether that reaches this headless
+    # holder, and whether re-asserting helps, is not measured. It costs nothing.
     while ($true) {
         [void][TimerNative]::NtSetTimerResolution($desired, $true, [ref]$cur)
         foreach ($tick in 1..120) {
@@ -281,7 +282,7 @@ if ($Measure) {
 
     if ($IsWin11 -and $g -ne 1) {
         Write-Host ""
-        Write-Host "Note: since Windows 10 2004 a resolution request only affects the requesting process. To make requests system-wide again, apply the GlobalTimerResolutionRequests tweak (run without -Measure)." -ForegroundColor DarkGray
+        Write-Host "Note: since Windows 10 2004 a program that requests no timer resolution of its own runs at the default, whatever other programs hold. To make requests system-wide again, apply the GlobalTimerResolutionRequests tweak (run without -Measure)." -ForegroundColor DarkGray
     }
     Wait-IfElevatedWindow
     return
@@ -624,7 +625,7 @@ $rows.Add([PSCustomObject]@{
     Id = 'holder-task'; Tweak = 'Hold finest timer resolution at logon'
     Current = $(if ($holderTask) { 'installed' } else { 'not installed' })
     Change = 'scheduled task (hidden, current user)'
-    Notes = "Open-source stand-in for TimerResolution.exe / ISLC$(if ($IsWin11) { '; on Win11 only matters together with the system-wide tweak' })"
+    Notes = "Open-source stand-in for TimerResolution.exe / ISLC$(if ($IsWin11) { '; without the system-wide tweak it helps only programs that request a resolution themselves' } elseif ([Environment]::OSVersion.Version.Build -ge 19041) { '; helps only programs that request a resolution themselves' })"
 })
 if ($bcdOk) {
     $rows.Add([PSCustomObject]@{
