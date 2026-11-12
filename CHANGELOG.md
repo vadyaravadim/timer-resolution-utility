@@ -22,6 +22,8 @@ went backwards once, so release order and version order disagree in this reposit
 - The README FAQ says how to remove the script and the files it leaves behind - and that `-Undo` or `-Reset`
   has to run first, because the holder task runs the saved script at every logon.
 - `Get-Help .\timer-resolution-utility.ps1 -Examples` shows how to run the script and each of its switches.
+- The README FAQ answers whether the bcdedit tweaks trigger BitLocker recovery: not with default settings,
+  since Microsoft lists all three among the boot settings BitLocker ignores.
 
 ### Changed
 
@@ -39,6 +41,13 @@ went backwards once, so release order and version order disagree in this reposit
 
 - On Windows Server Core the run stopped with a raw error when it opened the tweak grid instead of saying the
   edition is not supported. It now says so before the grid. Nothing was ever changed.
+- The README, the `-Measure` note and the holder row said that since Windows 10 2004 a timer request reaches
+  only the program that made it, so a background holder was "mostly a no-op". Microsoft documents otherwise: a
+  program that requests a resolution gets the finest one any program requested, and only programs that request
+  none stay at the default. They now say so, which matters on Windows 10, where there is no system-wide switch:
+  the holder still helps every game that asks for a resolution itself.
+- The README called `GlobalTimerResolutionRequests` documented and listed it for Server 2022. Microsoft does not
+  document it, and the script offers it on Windows 11 only. The README now says where it comes from.
 
 ## [1.3.2] - 2026-10-03
 
