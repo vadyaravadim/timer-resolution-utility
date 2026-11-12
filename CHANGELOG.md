@@ -13,6 +13,8 @@ went backwards once, so release order and version order disagree in this reposit
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-12
+
 ### Added
 
 - Each release also carries `timer-resolution-utility.ps1.sigstore.json`, the script's signed build
@@ -290,7 +292,8 @@ Reliability release: every finding from a deep code review of the first release 
   immediately.
 - An open-source alternative to the closed-source TimerResolution.exe and ISLC.
 
-[Unreleased]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/vadyaravadim/timer-resolution-utility/compare/v1.2.3...v1.3.0
