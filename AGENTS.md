@@ -1,6 +1,6 @@
 # Timer Resolution Utility
 
-Maintainer notes for Claude Code and the maintainer. Contributors start with [CONTRIBUTING.md](https://github.com/vadyaravadim/.github/blob/main/CONTRIBUTING.md); `rigpolice`, named below, is the maintainer's private website repository.
+Maintainer notes for coding agents and the maintainer. Contributors start with [CONTRIBUTING.md](https://github.com/vadyaravadim/.github/blob/main/CONTRIBUTING.md); `rigpolice`, named below, is the maintainer's private website repository.
 
 A single self-contained PowerShell script (`timer-resolution-utility.ps1`, ~630 lines - the largest in the
 family) that manages the Windows timer stack: timer resolution, the `bcdedit` timer tweaks, HPET, and the
@@ -165,7 +165,7 @@ so a clone of `main` was indistinguishable from the v1.0.0 release.
 An effect nobody measured, on frame times, DPC latency, stutter or input lag, is attributed to the guides
 that recommend the tweak or marked as not measured, never stated as fact, and the star ask names no
 effect. Frame time and ISR/DPC time are not input lag. The method lives in rigpolice's
-`.claude/rules/bench-methodology.md`, section "Conclusions".
+`bench-methodology.md`, section "Conclusions".
 
 ## The RigPolice pages that mirror this script
 
